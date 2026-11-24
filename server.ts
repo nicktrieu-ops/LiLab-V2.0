@@ -1650,7 +1650,13 @@ async function startServer() {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
-startServer().catch((err) => {
-  console.error('Fatal error starting LiLab Academy server:', err);
-  process.exit(1);
-});
+// On Vercel the API runs as a serverless function (api/index.ts imports this app) and the
+// built site is served by Vercel's CDN, so there is no long-running server to start.
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Fatal error starting LiLab Academy server:', err);
+    process.exit(1);
+  });
+}
+
+export default app;
