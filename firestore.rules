@@ -64,6 +64,17 @@ service cloud.firestore {
       );
     }
 
+    // V2: an approved account. People who register themselves start as 'pending'
+    // and cannot read academy data until an admin approves them.
+    function isMember() {
+      return isVerified() && (
+        isSuperAdmin() || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'
+        )
+      );
+    }
+
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
     }
@@ -114,7 +125,7 @@ service cloud.firestore {
 
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'preferredLang', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'phone', 'photoUrl', 'preferredLang', 'claimedInviteId', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'phone', 'photoUrl', 'preferredLang', 'claimedInviteId', 'status', 'reviewedByEmail', 'reviewedAt', 'reviewNote', 'createdAt', 'updatedAt'])
         && isValidId(data.uid)
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
@@ -123,7 +134,10 @@ service cloud.firestore {
         && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 250000))
         && data.preferredLang in ['en', 'vi', 'bi']
         && (!('claimedInviteId' in data) || isValidId(data.claimedInviteId))
-        && data.status in ['active', 'inactive'];
+        && data.status in ['active', 'inactive', 'pending', 'declined']
+        && (!('reviewedByEmail' in data) || (data.reviewedByEmail is string && data.reviewedByEmail.size() <= 160))
+        && (!('reviewedAt' in data) || (data.reviewedAt is string && data.reviewedAt.size() <= 40))
+        && (!('reviewNote' in data) || (data.reviewNote is string && data.reviewNote.size() <= 300));
     }
 
     function isValidUserInvite(data) {
@@ -660,7 +674,7 @@ service cloud.firestore {
         (
           isVerified() && request.auth.uid == uid && incoming().uid == uid && incoming().email == request.auth.token.email && (
             (isSuperAdmin() && incoming().role == 'super_admin') ||
-            (incoming().role in ['parent', 'student']) ||
+            (incoming().role in ['parent', 'student'] && incoming().status == 'pending') ||
             (('claimedInviteId' in incoming()) && incoming().role in ['admin', 'teacher', 'parent', 'student'] && hasValidPendingInvite(incoming().claimedInviteId, incoming().role))
           )
         )
@@ -687,12 +701,12 @@ service cloud.firestore {
 
     // /teachers/{teacherId}
     match /teachers/{teacherId} {
-      allow get: if isValidId(teacherId) && (isAdmin() || (isVerified() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid)));
-      allow list: if isListedAdmin() || (isVerified() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid));
+      allow get: if isValidId(teacherId) && (isAdmin() || (isMember() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid)));
+      allow list: if isListedAdmin() || (isMember() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid));
       allow create: if isValidId(teacherId) && isAdmin() && isValidTeacherProfile(incoming()) && hasValidTimestampsOnCreate(incoming());
       allow update: if isValidId(teacherId) && isValidTeacherProfile(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().hourlyRateVnd == existing().hourlyRateVnd && incoming().monthlyBaseVnd == existing().monthlyBaseVnd && incoming().payStatus == existing().payStatus && incoming().diff(existing()).affectedKeys().hasOnly(['teacherUid', 'fullName', 'phone', 'photoUrl', 'specialty', 'cefrCertification', 'bioEn', 'bioVi', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'updatedAt']))
+        (isMember() && existing().teacherEmail == request.auth.token.email && incoming().hourlyRateVnd == existing().hourlyRateVnd && incoming().monthlyBaseVnd == existing().monthlyBaseVnd && incoming().payStatus == existing().payStatus && incoming().diff(existing()).affectedKeys().hasOnly(['teacherUid', 'fullName', 'phone', 'photoUrl', 'specialty', 'cefrCertification', 'bioEn', 'bioVi', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'updatedAt']))
       );
       allow delete: if isValidId(teacherId) && isAdmin();
     }
@@ -701,7 +715,7 @@ service cloud.firestore {
     match /students/{studentId} {
       allow get: if isValidId(studentId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().parentEmail == request.auth.token.email ||
           existing().parentUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
@@ -709,7 +723,7 @@ service cloud.firestore {
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().parentEmail == request.auth.token.email ||
           existing().parentUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
@@ -718,12 +732,12 @@ service cloud.firestore {
       );
       allow create: if isValidId(studentId) && isValidStudentProfile(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified() && incoming().parentEmail == request.auth.token.email && incoming().parentUid == request.auth.uid)
+        (isMember() && incoming().parentEmail == request.auth.token.email && incoming().parentUid == request.auth.uid)
       );
       allow update: if isValidId(studentId) && isValidStudentProfile(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && (request.auth.token.email in existing().assignedTeacherEmails) && incoming().diff(existing()).affectedKeys().hasOnly(['cefrLevel', 'cefrModifier', 'activitiesNote', 'photoUrl', 'updatedAt'])) ||
-        (isVerified() && (existing().parentEmail == request.auth.token.email || existing().parentUid == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['parentUid', 'parentName', 'parentPhone', 'photoUrl', 'activitiesNote', 'updatedAt']))
+        (isMember() && (request.auth.token.email in existing().assignedTeacherEmails) && incoming().diff(existing()).affectedKeys().hasOnly(['cefrLevel', 'cefrModifier', 'activitiesNote', 'photoUrl', 'updatedAt'])) ||
+        (isMember() && (existing().parentEmail == request.auth.token.email || existing().parentUid == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['parentUid', 'parentName', 'parentPhone', 'photoUrl', 'activitiesNote', 'updatedAt']))
       );
       allow delete: if isValidId(studentId) && isAdmin();
     }
@@ -753,7 +767,7 @@ service cloud.firestore {
       allow create: if isValidId(scheduleId) && isAdmin() && isValidClassSchedule(incoming()) && hasValidTimestampsOnCreate(incoming());
       allow update: if isValidId(scheduleId) && isValidClassSchedule(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'topicEn', 'topicVi', 'updatedAt']))
+        (isMember() && existing().teacherEmail == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'topicEn', 'topicVi', 'updatedAt']))
       );
       allow delete: if isValidId(scheduleId) && isAdmin();
     }
@@ -762,14 +776,14 @@ service cloud.firestore {
     match /assessments/{assessmentId} {
       allow get: if isValidId(assessmentId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().teacherEmail == request.auth.token.email ||
           existing().parentEmail == request.auth.token.email ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().teacherEmail == request.auth.token.email ||
           existing().parentEmail == request.auth.token.email ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
@@ -777,15 +791,15 @@ service cloud.firestore {
       );
       allow create: if isValidId(assessmentId) && isValidStudentAssessment(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified() && incoming().teacherEmail == request.auth.token.email && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+        (isMember() && incoming().teacherEmail == request.auth.token.email && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
       );
       allow update: if isValidId(assessmentId) && isValidStudentAssessment(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['termLabel', 'cefrLevel', 'cefrModifier', 'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore', 'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore', 'teacherCommentEn', 'teacherCommentVi', 'aiInsightEn', 'aiInsightVi', 'activitiesCompleted', 'updatedAt']))
+        (isMember() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['termLabel', 'cefrLevel', 'cefrModifier', 'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore', 'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore', 'teacherCommentEn', 'teacherCommentVi', 'aiInsightEn', 'aiInsightVi', 'activitiesCompleted', 'updatedAt']))
       );
       allow delete: if isValidId(assessmentId) && (
         isAdmin() ||
-        (isVerified() && existing().teacherEmail == request.auth.token.email)
+        (isMember() && existing().teacherEmail == request.auth.token.email)
       );
     }
 
@@ -800,11 +814,11 @@ service cloud.firestore {
 
     // /invoices/{invoiceId}
     match /invoices/{invoiceId} {
-      allow get: if isValidId(invoiceId) && (isAdmin() || (isVerified() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid))));
-      allow list: if isListedAdmin() || (isVerified() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid)));
+      allow get: if isValidId(invoiceId) && (isAdmin() || (isMember() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid))));
+      allow list: if isListedAdmin() || (isMember() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid)));
       allow create: if isValidId(invoiceId) && isValidTuitionInvoice(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified()
+        (isMember()
           && incoming().parentEmail == request.auth.token.email
           && ('parentUid' in incoming()) && incoming().parentUid == request.auth.uid
           && exists(/databases/$(database)/documents/students/$(incoming().studentId))
@@ -819,7 +833,7 @@ service cloud.firestore {
       );
       allow update: if isValidId(invoiceId) && isValidTuitionInvoice(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified()
+        (isMember()
           && existing().parentEmail == request.auth.token.email
           && existing().status != 'paid'
           && incoming().amountVnd == existing().amountVnd
@@ -862,11 +876,11 @@ service cloud.firestore {
 
     // /enrollments/{enrollmentId}
     match /enrollments/{enrollmentId} {
-      allow get: if isValidId(enrollmentId) && (isAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
-      allow list: if isListedAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
+      allow get: if isValidId(enrollmentId) && (isAdmin() || (isMember() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
+      allow list: if isListedAdmin() || (isMember() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
       allow create: if isValidId(enrollmentId) && isValidEnrollmentRequest(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email && incoming().status in ['pending', 'enrolled'] && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+        (isMember() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email && incoming().status in ['pending', 'enrolled'] && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
       );
       allow update: if isValidId(enrollmentId) && isAdmin() && isValidEnrollmentRequest(incoming()) && hasValidTimestampsOnUpdate(incoming());
       allow delete: if isValidId(enrollmentId) && isAdmin();
@@ -874,32 +888,32 @@ service cloud.firestore {
 
     // /payment_methods/{methodId}
     match /payment_methods/{methodId} {
-      allow get: if isValidId(methodId) && (isAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
-      allow list: if isListedAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
+      allow get: if isValidId(methodId) && (isAdmin() || (isMember() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
+      allow list: if isListedAdmin() || (isMember() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
       allow create: if isValidId(methodId) && isValidParentPaymentMethod(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email)
+        (isMember() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email)
       );
       allow update: if isValidId(methodId) && isValidParentPaymentMethod(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && existing().parentUid == request.auth.uid && incoming().parentUid == existing().parentUid && incoming().parentEmail == existing().parentEmail && incoming().diff(existing()).affectedKeys().hasOnly(['methodType', 'providerLabel', 'bankName', 'accountLast4', 'accountNumberMasked', 'accountHolderName', 'parentPhone', 'branchOrNotes', 'autoPayEnabled', 'updatedAt']))
+        (isMember() && existing().parentUid == request.auth.uid && incoming().parentUid == existing().parentUid && incoming().parentEmail == existing().parentEmail && incoming().diff(existing()).affectedKeys().hasOnly(['methodType', 'providerLabel', 'bankName', 'accountLast4', 'accountNumberMasked', 'accountHolderName', 'parentPhone', 'branchOrNotes', 'autoPayEnabled', 'updatedAt']))
       );
-      allow delete: if isValidId(methodId) && (isAdmin() || (isVerified() && existing().parentUid == request.auth.uid));
+      allow delete: if isValidId(methodId) && (isAdmin() || (isMember() && existing().parentUid == request.auth.uid));
     }
 
     // /quick_notes/{noteId} — Teacher Daily Student Observations
     match /quick_notes/{noteId} {
-      allow get: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email));
-      allow list: if isListedAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email);
+      allow get: if isValidId(noteId) && (isAdmin() || (isMember() && existing().teacherEmail == request.auth.token.email));
+      allow list: if isListedAdmin() || (isMember() && existing().teacherEmail == request.auth.token.email);
       allow create: if isValidId(noteId) && isValidQuickNote(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
         isAdmin() ||
-        (isVerified() && incoming().teacherEmail == request.auth.token.email && incoming().teacherUid == request.auth.uid && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+        (isMember() && incoming().teacherEmail == request.auth.token.email && incoming().teacherUid == request.auth.uid && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
       );
       allow update: if isValidId(noteId) && isValidQuickNote(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
         isAdmin() ||
-        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherUid == existing().teacherUid && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['noteText', 'category', 'observationDate', 'includeInReport', 'updatedAt']))
+        (isMember() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherUid == existing().teacherUid && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['noteText', 'category', 'observationDate', 'includeInReport', 'updatedAt']))
       );
-      allow delete: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email));
+      allow delete: if isValidId(noteId) && (isAdmin() || (isMember() && existing().teacherEmail == request.auth.token.email));
     }
 
     // /learning_resources/{resourceId} — Uploaded PDF Handouts, Worksheets & Reading Materials
@@ -933,14 +947,14 @@ service cloud.firestore {
     match /issued_certificates/{certificateId} {
       allow get: if isValidId(certificateId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().parentEmail == request.auth.token.email ||
           (('parentUid' in existing()) && existing().parentUid == request.auth.uid) ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().parentEmail == request.auth.token.email ||
           (('parentUid' in existing()) && existing().parentUid == request.auth.uid) ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
@@ -965,14 +979,14 @@ service cloud.firestore {
     match /student_mind_maps/{mapId} {
       allow get: if isValidId(mapId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
@@ -981,33 +995,33 @@ service cloud.firestore {
       allow create: if isValidId(mapId)
         && isValidStudentMindMap(incoming())
         && hasValidTimestampsOnCreate(incoming())
-        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+        && (isAdmin() || (isMember() && incoming().ownerUid == request.auth.uid));
       allow update: if isValidId(mapId)
         && isValidStudentMindMap(incoming())
         && hasValidTimestampsOnUpdate(incoming())
         && (
           isAdmin() ||
-          (isVerified()
+          (isMember()
             && existing().ownerUid == request.auth.uid
             && incoming().ownerUid == existing().ownerUid
             && incoming().studentId == existing().studentId
           )
         );
-      allow delete: if isValidId(mapId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+      allow delete: if isValidId(mapId) && (isAdmin() || (isMember() && existing().ownerUid == request.auth.uid));
     }
 
     // /student_study_notes/{noteId} — Student Lesson Study Notes
     match /student_study_notes/{noteId} {
       allow get: if isValidId(noteId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
@@ -1016,33 +1030,33 @@ service cloud.firestore {
       allow create: if isValidId(noteId)
         && isValidStudentStudyNote(incoming())
         && hasValidTimestampsOnCreate(incoming())
-        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+        && (isAdmin() || (isMember() && incoming().ownerUid == request.auth.uid));
       allow update: if isValidId(noteId)
         && isValidStudentStudyNote(incoming())
         && hasValidTimestampsOnUpdate(incoming())
         && (
           isAdmin() ||
-          (isVerified()
+          (isMember()
             && existing().ownerUid == request.auth.uid
             && incoming().ownerUid == existing().ownerUid
             && incoming().studentId == existing().studentId
           )
         );
-      allow delete: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+      allow delete: if isValidId(noteId) && (isAdmin() || (isMember() && existing().ownerUid == request.auth.uid));
     }
 
     // /student_code_progress/{progressId} — Student Vibe Coding Lab XP & Digital Badges
     match /student_code_progress/{progressId} {
       allow get: if isValidId(progressId) && (
         isAdmin() ||
-        (isVerified() && (
+        (isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
         ))
       );
       allow list: if isListedAdmin() || (
-        isVerified() && (
+        isMember() && (
           existing().ownerUid == request.auth.uid ||
           (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
           (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
@@ -1051,19 +1065,50 @@ service cloud.firestore {
       allow create: if isValidId(progressId)
         && isValidStudentCodeProgress(incoming())
         && hasValidTimestampsOnCreate(incoming())
-        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+        && (isAdmin() || (isMember() && incoming().ownerUid == request.auth.uid));
       allow update: if isValidId(progressId)
         && isValidStudentCodeProgress(incoming())
         && hasValidTimestampsOnUpdate(incoming())
         && (
           isAdmin() ||
-          (isVerified()
+          (isMember()
             && existing().ownerUid == request.auth.uid
             && incoming().ownerUid == existing().ownerUid
             && incoming().studentId == existing().studentId
           )
         );
-      allow delete: if isValidId(progressId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+      allow delete: if isValidId(progressId) && (isAdmin() || (isMember() && existing().ownerUid == request.auth.uid));
+    }
+    // V2 CRM: admins only
+    function isValidCrmDoc(data) {
+      return data.size() <= 40
+        && (!('fullName' in data) || (data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 160))
+        && (!('title' in data) || (data.title is string && data.title.size() >= 1 && data.title.size() <= 200))
+        && (!('body' in data) || (data.body is string && data.body.size() <= 4000))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 4000))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 20))
+        && (!('amountVnd' in data) || (data.amountVnd is number && data.amountVnd >= 0));
+    }
+
+    match /crm_contacts/{id} {
+      allow read: if isValidId(id) && isAdmin();
+      allow create, update: if isValidId(id) && isAdmin() && isValidCrmDoc(incoming());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+    match /crm_deals/{id} {
+      allow read: if isValidId(id) && isAdmin();
+      allow create, update: if isValidId(id) && isAdmin() && isValidCrmDoc(incoming());
+      allow delete: if isValidId(id) && isAdmin();
+    }
+    match /crm_activities/{id} {
+      allow read: if isValidId(id) && isAdmin();
+      allow create: if isValidId(id) && isAdmin() && isValidCrmDoc(incoming()) && incoming().authorEmail == request.auth.token.email;
+      allow update, delete: if isValidId(id) && isAdmin();
+    }
+    match /crm_tasks/{id} {
+      allow read: if isValidId(id) && isAdmin();
+      allow create, update: if isValidId(id) && isAdmin() && isValidCrmDoc(incoming());
+      allow delete: if isValidId(id) && isAdmin();
     }
   }
 }

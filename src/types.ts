@@ -29,7 +29,12 @@ export interface UserProfile {
   photoUrl?: string;
   preferredLang: LangCode;
   claimedInviteId?: string;
-  status: 'active' | 'inactive';
+  /** pending = signed up and waiting for admin approval; declined = refused by an admin */
+  status: 'active' | 'inactive' | 'pending' | 'declined';
+  /** Set by the admin who approved or declined the account */
+  reviewedByEmail?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -629,3 +634,87 @@ export interface StudentCodeProgressRecord {
 }
 
 
+
+// ---------------------------------------------------------------------------
+// CRM (admin only)
+// ---------------------------------------------------------------------------
+
+export type CrmContactType = 'lead' | 'parent' | 'student' | 'teacher' | 'partner';
+
+export type CrmLifecycleStage = 'subscriber' | 'lead' | 'qualified' | 'opportunity' | 'customer' | 'alumni';
+
+export type CrmLeadSource =
+  | 'website'
+  | 'signup'
+  | 'zalo'
+  | 'facebook'
+  | 'referral'
+  | 'walk_in'
+  | 'event'
+  | 'roster'
+  | 'other';
+
+export interface CrmContact {
+  id: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  contactType: CrmContactType;
+  lifecycleStage: CrmLifecycleStage;
+  leadSource: CrmLeadSource;
+  ownerEmail?: string;
+  tags: string[];
+  childNames?: string;
+  notes?: string;
+  linkedUid?: string;
+  lastActivityAt?: string;
+  createdByEmail: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type CrmDealStage = 'new' | 'contacted' | 'trial_booked' | 'trial_done' | 'offer' | 'won' | 'lost';
+
+export interface CrmDeal {
+  id: string;
+  title: string;
+  contactId: string;
+  contactName: string;
+  programId?: string;
+  programTitle?: string;
+  amountVnd: number;
+  stage: CrmDealStage;
+  expectedCloseDate?: string;
+  ownerEmail?: string;
+  lostReason?: string;
+  createdByEmail: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type CrmActivityType = 'note' | 'call' | 'zalo' | 'email' | 'meeting' | 'stage_change' | 'approval';
+
+export interface CrmActivity {
+  id: string;
+  contactId: string;
+  dealId?: string;
+  activityType: CrmActivityType;
+  body: string;
+  occurredAt: string;
+  authorEmail: string;
+  createdAt?: unknown;
+}
+
+export interface CrmTask {
+  id: string;
+  title: string;
+  contactId?: string;
+  contactName?: string;
+  dealId?: string;
+  dueDate: string;
+  ownerEmail?: string;
+  done: boolean;
+  createdByEmail: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}

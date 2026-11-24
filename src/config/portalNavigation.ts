@@ -6,6 +6,7 @@ export type AdminTab =
   | 'overview'
   | 'reports'
   | 'users'
+  | 'crm'
   | 'programs'
   | 'finance'
   | 'gemini_notes'
@@ -107,6 +108,7 @@ export function getAdminNavTabs(lang: LangCode): NavTabItem<AdminTab>[] {
     { id: 'overview', label: biText(lang, 'Overview', 'Tổng quan') },
     { id: 'reports', label: biText(lang, 'Reports', 'Báo cáo') },
     { id: 'users', label: biText(lang, 'Users & Roster', 'Học viên & NS') },
+    { id: 'crm', label: biText(lang, 'CRM', 'CRM Khách hàng') },
     { id: 'programs', label: biText(lang, 'Programs', 'Chương trình') },
     { id: 'finance', label: biText(lang, 'Accounts & Banking', 'Tài chính') },
     { id: 'gemini_notes', label: biText(lang, 'Resource Library', 'Thư viện Học liệu') },

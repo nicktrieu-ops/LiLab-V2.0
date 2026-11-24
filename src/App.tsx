@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -31,6 +32,7 @@ import type { LangCode, UserProfile, UserRole } from './types';
 import { AcademyContactSection } from './components/AcademyContactSection';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginView } from './components/LoginView';
+import { PendingApprovalView } from './components/PendingApprovalView';
 import { ProfileAvatar } from './components/ProfileAvatar';
 import { LangSwitch, OfferStrip, PortalLoader, SegmentedControl } from './components/ui/Primitives';
 
@@ -102,6 +104,8 @@ export default function App() {
   const PROFILE_CACHE_PREFIX = 'lilab_profile_v2_';
   const rememberProfile = (profile: UserProfile) => {
     setUserProfile(profile);
+    // Only approved profiles are cached, so an approval takes effect on the next load.
+    if (profile.status !== 'active') return;
     try {
       sessionStorage.setItem(PROFILE_CACHE_PREFIX + profile.uid, JSON.stringify(profile));
     } catch {
@@ -118,6 +122,7 @@ export default function App() {
       const cached = sessionStorage.getItem(PROFILE_CACHE_PREFIX + user.uid);
       if (cached) {
         const parsed = JSON.parse(cached) as UserProfile;
+        if (parsed.status !== 'active') throw new Error('stale');
         setUserProfile(parsed);
         if (parsed.preferredLang) setLang(parsed.preferredLang);
         return;
@@ -263,13 +268,17 @@ export default function App() {
         });
       }
 
+      // V2: people who register themselves wait for an admin to approve them.
+      // Anyone who claimed an admin invite is approved already.
+      const initialStatus: UserProfile['status'] = claimedInviteId ? 'active' : 'pending';
+
       const profilePayload: Record<string, unknown> = {
         uid: user.uid,
         email,
         displayName,
         role: assignedRole,
         preferredLang: lang,
-        status: 'active',
+        status: initialStatus,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -295,7 +304,7 @@ export default function App() {
         displayName,
         role: assignedRole,
         preferredLang: lang,
-        status: 'active',
+        status: initialStatus,
         ...(claimedInviteId ? { claimedInviteId } : {}),
       };
       rememberProfile(builtProfile);
@@ -363,6 +372,17 @@ export default function App() {
     }
   }, [userProfile?.role]);
 
+  // While an account waits for approval, watch it so the portal opens the moment an admin approves.
+  const awaitingReview = userProfile?.status === 'pending' || userProfile?.status === 'declined';
+  useEffect(() => {
+    if (!awaitingReview || !firebaseUser) return;
+    return onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
+      if (!snap.exists()) return;
+      const next = snap.data() as UserProfile;
+      if (next.status !== userProfile?.status || next.role !== userProfile?.role) rememberProfile(next);
+    });
+  }, [awaitingReview, firebaseUser?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const t = TRANSLATIONS[lang];
 
   if (!authReady || profileLoading) {
@@ -418,6 +438,17 @@ export default function App() {
           </Suspense>
         )}
       </>
+    );
+  }
+
+  if (userProfile && awaitingReview && !isSuperAdminEmail(userProfile.email)) {
+    return (
+      <PendingApprovalView
+        lang={lang}
+        onToggleLang={handleToggleLang}
+        profile={userProfile}
+        onSignOut={() => void signOut(auth)}
+      />
     );
   }
 

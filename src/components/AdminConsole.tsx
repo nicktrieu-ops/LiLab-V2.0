@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import {
   Award,
+  Handshake,
   Banknote,
   BellRing,
   BookOpen,
@@ -79,6 +80,9 @@ const AdminAccountsBankingDashboard = lazy(() =>
 );
 const AdminOperationsPanel = lazy(() =>
   import('./admin/AdminOperationsPanel').then((m) => ({ default: m.AdminOperationsPanel }))
+);
+const AdminCrmPanel = lazy(() =>
+  import('./admin/AdminCrmPanel').then((m) => ({ default: m.AdminCrmPanel }))
 );
 const AdminProgramsPanel = lazy(() =>
   import('./admin/AdminProgramsPanel').then((m) => ({ default: m.AdminProgramsPanel }))
@@ -1259,6 +1263,13 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
       id: 'users',
       label: biText(lang, 'Users & Roster', 'Người Dùng & Danh Sách'),
       icon: <Users className="w-4 h-4" />,
+    },
+    {
+      id: 'crm',
+      label:
+        biText(lang, 'CRM', 'CRM Khách hàng') +
+        (users.some((u) => u.status === 'pending') ? ` (${users.filter((u) => u.status === 'pending').length})` : ''),
+      icon: <Handshake className="w-4 h-4" />,
     },
     {
       id: 'programs',
@@ -3388,8 +3399,40 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
       )}
 
       {/* TAB 2: USERS, TEACHERS & STUDENTS */}
+      {activeTab === 'crm' && (
+        <AdminCrmPanel
+          lang={lang}
+          currentUser={safeCurrentUser}
+          users={users}
+          students={students}
+          programs={programs}
+          enrollments={enrollments}
+          invoices={invoices}
+          onFlash={flash}
+        />
+      )}
+
       {activeTab === 'users' && (
         <div className="space-y-6">
+          {users.some((u) => u.status === 'pending') && (
+            <div className="bg-white border border-ink/10 rounded-2xl pl-5 pr-3 py-3 flex flex-wrap items-center justify-between gap-3 relative overflow-hidden">
+              <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5 bg-lotus" />
+              <p className="text-sm font-bold text-ink">
+                {biText(
+                  lang,
+                  `${users.filter((u) => u.status === 'pending').length} new account(s) waiting for approval`,
+                  `${users.filter((u) => u.status === 'pending').length} tài khoản mới đang chờ duyệt`
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('crm')}
+                className="px-4 py-2 rounded-lg bg-lantern hover:bg-lantern-deep text-white text-xs font-bold cursor-pointer"
+              >
+                {biText(lang, 'Review sign-ups', 'Duyệt tài khoản')}
+              </button>
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* 1. Add Student Profile (First) */}
             <form onSubmit={handleAddStudent} className="bg-white border border-[#2D3E99]/12 rounded-xl p-6 space-y-3">

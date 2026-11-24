@@ -215,6 +215,46 @@ export async function seedPreviewAcademy(): Promise<void> {
     noteVi: 'Bé tự đọc to cả trang Sư tử và Chuột.',
   });
 
+  // Sign-ups waiting for approval (CRM tab)
+  put('users', 'pv_pending_1', {
+    uid: 'pv_pending_1',
+    email: 'thao.nguyen.preview@lilab.example',
+    displayName: 'Nguyễn Phương Thảo',
+    role: 'parent',
+    preferredLang: 'vi',
+    status: 'pending',
+  });
+  put('users', 'pv_pending_2', {
+    uid: 'pv_pending_2',
+    email: 'minh.khoa.preview@lilab.example',
+    displayName: 'Minh Khoa',
+    role: 'student',
+    preferredLang: 'en',
+    status: 'pending',
+  });
+
+  // CRM sample: contacts, deals across the pipeline, activity and tasks
+  const crmContacts = [
+    { id: 'e_parent_preview', fullName: 'Nguyễn Thị Lan', email: A.parent.email, phone: '0901 234 567', contactType: 'parent', lifecycleStage: 'customer', leadSource: 'referral', childNames: 'Trần Gia Bảo (8), Trần Minh An (10)', tags: ['siblings'] },
+    { id: 'ct_huong', fullName: 'Phạm Thu Hương', email: 'huong.preview@lilab.example', phone: '0912 555 010', contactType: 'lead', lifecycleStage: 'opportunity', leadSource: 'zalo', childNames: 'Bé Na (7)', tags: ['Thu Duc'] },
+    { id: 'ct_david', fullName: 'David Tran', email: 'david.preview@lilab.example', phone: '0938 777 222', contactType: 'lead', lifecycleStage: 'qualified', leadSource: 'facebook', childNames: 'Ethan (9)', tags: [] },
+    { id: 'ct_mai', fullName: 'Lê Ngọc Mai', email: 'mai.preview@lilab.example', phone: '0976 333 444', contactType: 'lead', lifecycleStage: 'lead', leadSource: 'walk_in', childNames: 'Bin (6)', tags: ['Saturday'] },
+  ];
+  crmContacts.forEach((c, i) =>
+    put('crm_contacts', c.id, { ...c, ownerEmail: A.admin.email, createdByEmail: A.admin.email, lastActivityAt: new Date(Date.now() - i * 86400000).toISOString() })
+  );
+  const crmDeals = [
+    { id: 'deal_huong', title: 'Bé Na · Music & Poetry', contactId: 'ct_huong', contactName: 'Phạm Thu Hương', amountVnd: 2400000, stage: 'trial_booked', expectedCloseDate: iso(6) },
+    { id: 'deal_david', title: 'Ethan · Movers term', contactId: 'ct_david', contactName: 'David Tran', amountVnd: 5400000, stage: 'contacted', expectedCloseDate: iso(14) },
+    { id: 'deal_mai', title: 'Bin · Starters', contactId: 'ct_mai', contactName: 'Lê Ngọc Mai', amountVnd: 2000000, stage: 'new' },
+    { id: 'deal_lan', title: 'Minh An · Movers term 3', contactId: 'e_parent_preview', contactName: 'Nguyễn Thị Lan', amountVnd: 2000000, stage: 'won', expectedCloseDate: iso(-3) },
+  ];
+  crmDeals.forEach((d) => put('crm_deals', d.id, { ...d, ownerEmail: A.admin.email, createdByEmail: A.admin.email }));
+  put('crm_activities', 'act_1', { contactId: 'ct_huong', activityType: 'zalo', body: 'Mum asked about Saturday morning classes. Booked a free trial for next Saturday 9:00.', occurredAt: new Date(Date.now() - 86400000).toISOString(), authorEmail: A.admin.email });
+  put('crm_activities', 'act_2', { contactId: 'ct_david', activityType: 'call', body: 'Dad wants a placement test before choosing a level.', occurredAt: new Date(Date.now() - 2 * 86400000).toISOString(), authorEmail: A.admin.email });
+  put('crm_tasks', 'task_1', { title: 'Confirm trial time with Hương', contactId: 'ct_huong', contactName: 'Phạm Thu Hương', dueDate: iso(1), ownerEmail: A.admin.email, done: false, createdByEmail: A.admin.email });
+  put('crm_tasks', 'task_2', { title: 'Send placement test link', contactId: 'ct_david', contactName: 'David Tran', dueDate: iso(-1), ownerEmail: A.admin.email, done: false, createdByEmail: A.admin.email });
+
   // The app's own baseline: programs, Week 01 curriculum note, master group schedule
   await seedAcademyBaseline(A.admin.uid, A.admin.email);
   await seedLilabMasterSchedule(A.admin.uid, A.admin.email, false);
