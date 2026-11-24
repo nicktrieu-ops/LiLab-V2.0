@@ -4,19 +4,11 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
-import { isServerSuperAdmin, requireAuth, SERVER_SUPER_ADMIN_EMAILS, type AuthRequest } from './src/middleware/auth.ts';
-import { adminAuth } from './src/lib/firebase-admin.ts';
-import {
-  deleteAcademyRecord,
-  getMediaAsset,
-  getProtectedMaterial,
-  getSqlAcademySnapshotForAdmin,
-  resetAllAcademySqlRecords,
-  upsertAcademyRecord,
-  upsertProtectedMaterial,
-  type AcademyCollectionName,
-} from './src/db/academyRepo.ts';
-import { getOrCreateUser } from './src/db/users.ts';
+import { getOptionalUser, isServerSuperAdmin, requireAuth, type AuthRequest } from './src/middleware/auth.ts';
+import { adminDb } from './src/lib/firebase-admin.ts';
+import { getAppCheck } from 'firebase-admin/app-check';
+import { loadMediaAsset, loadProtectedMaterial, saveProtectedMaterial } from './src/services/storageMaterials.ts';
+import { loadStoredNarration, narrationKey, storeNarration, synthesizeNarration } from './src/services/ttsNarration.ts';
 
 // V2 cost control: small in-memory LRU for repeatable AI outputs (TTS audio, translations).
 // The same phrase narrated or translated twice is served from memory instead of a new paid call.
@@ -85,11 +77,18 @@ app.use(express.json({ limit: '15mb' }));
 
 // Lightweight in-memory rate limiter for public AI endpoints to prevent API credit abuse
 const aiRateBuckets = new Map<string, { count: number; resetAt: number }>();
-function checkPublicAiRateLimit(req: express.Request, maxPerWindow = 30, windowMs = 5 * 60 * 1000): boolean {
+function checkPublicAiRateLimit(
+  req: express.Request,
+  maxPerWindow = 30,
+  windowMs = 5 * 60 * 1000,
+  bucketKey?: string
+): boolean {
   const ip =
+    bucketKey ||
     (typeof req.headers['x-forwarded-for'] === 'string'
       ? req.headers['x-forwarded-for'].split(',')[0].trim()
-      : req.ip) || 'unknown';
+      : req.ip) ||
+    'unknown';
   const now = Date.now();
   const bucket = aiRateBuckets.get(ip);
   if (!bucket || now > bucket.resetAt) {
@@ -99,6 +98,63 @@ function checkPublicAiRateLimit(req: express.Request, maxPerWindow = 30, windowM
   }
   if (bucket.count >= maxPerWindow) return false;
   bucket.count += 1;
+  return true;
+}
+
+// V2: guests (no sign-in) share a small daily allowance per server instance, so a bot hitting
+// the open chat/translate endpoints can't run up the AI bill. Signed-in users keep their own limits.
+const GUEST_DAILY_AI_CAP = Number(process.env.LILAB_GUEST_DAILY_AI_CAP || 300);
+let guestAiDay = '';
+let guestAiCount = 0;
+function takeGuestAiAllowance(): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== guestAiDay) {
+    guestAiDay = today;
+    guestAiCount = 0;
+  }
+  if (guestAiCount >= GUEST_DAILY_AI_CAP) return false;
+  guestAiCount += 1;
+  return true;
+}
+
+// Optional Firebase App Check: set LILAB_REQUIRE_APP_CHECK=true once the web app has a
+// reCAPTCHA Enterprise site key (VITE_RECAPTCHA_SITE_KEY). Requests from scripts are then refused.
+const REQUIRE_APP_CHECK = process.env.LILAB_REQUIRE_APP_CHECK === 'true';
+async function passesAppCheck(req: express.Request): Promise<boolean> {
+  if (!REQUIRE_APP_CHECK) return true;
+  const token = req.header('X-Firebase-AppCheck');
+  if (!token) return false;
+  try {
+    await getAppCheck().verifyToken(token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Gate for AI endpoints that guests may use: App Check, then guest allowance or per-user limit. */
+async function guardOpenAiEndpoint(
+  req: express.Request,
+  res: express.Response,
+  signedInMax: number,
+  guestMax: number
+): Promise<boolean> {
+  if (!(await passesAppCheck(req))) {
+    res.status(403).json({ error: 'This request could not be verified. Reload the page and try again.' });
+    return false;
+  }
+  const user = await getOptionalUser(req);
+  if (user) {
+    if (!checkPublicAiRateLimit(req, signedInMax, 5 * 60 * 1000, `uid:${user.uid}`)) {
+      res.status(429).json({ error: 'Too many requests. Wait a minute and try again.' });
+      return false;
+    }
+    return true;
+  }
+  if (!checkPublicAiRateLimit(req, guestMax, 5 * 60 * 1000) || !takeGuestAiAllowance()) {
+    res.status(429).json({ error: 'The guest assistant is busy. Sign in to keep chatting.' });
+    return false;
+  }
   return true;
 }
 
@@ -142,20 +198,26 @@ async function resolveCallerRole(req: AuthRequest): Promise<{
   const email = (req.user?.email || '').trim().toLowerCase();
   const superAdmin = isServerSuperAdmin(email);
   let role = superAdmin ? 'super_admin' : 'parent';
-  if (uid && email) {
+  if (uid && !superAdmin) {
     try {
-      const sqlUser = await getOrCreateUser({ uid, email });
-      if (sqlUser?.role) {
-        role = superAdmin ? 'super_admin' : sqlUser.role;
-      }
+      // Firestore is the source of truth for roles (V2.0 retired the Cloud SQL copy)
+      const profile = await adminDb.collection('users').doc(uid).get();
+      const storedRole = profile.exists ? String(profile.get('role') || '') : '';
+      if (storedRole) role = storedRole;
     } catch {
-      // Fallback to token-derived role
+      // Fall back to the least-privileged role
     }
   }
   const isAdmin = superAdmin || role === 'super_admin' || role === 'admin';
   const isTeacher = role === 'teacher';
   return { uid, email, role, isSuperAdmin: superAdmin || role === 'super_admin', isAdmin, isTeacher };
 }
+
+// V2 cost control: each AI feature names its own model so cheaper tiers can be set per feature
+// in Settings > Secrets without a code change. Story Studio only needs structured JSON, so
+// point LILAB_STORY_MODEL at the cheapest Flash-Lite model your key can use.
+const STORY_MODEL = process.env.LILAB_STORY_MODEL || 'gemini-4-hydrogen';
+const SPEAKING_MODEL = process.env.LILAB_SPEAKING_MODEL || 'gemini-4-hydrogen';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'openrouter/free';
@@ -328,17 +390,11 @@ app.get('/api/media/:key', async (req, res) => {
           etag: `"local-${key}-${buffer.length}"`,
         };
       } else {
-        const row = await getMediaAsset(key);
-        if (!row || !row.dataBase64) {
+        const stored = await loadMediaAsset(key).catch(() => null);
+        if (!stored) {
           return res.status(404).json({ error: 'Media asset not found.' });
         }
-        const buffer = Buffer.from(row.dataBase64, 'base64');
-        const etag = row.etag || `"${key}-${buffer.length}"`;
-        entry = {
-          buffer,
-          mimeType: row.mimeType || 'application/octet-stream',
-          etag,
-        };
+        entry = stored;
       }
       // Cap in-memory cache to 128 items to keep memory footprint bounded
       if (mediaCache.size > 128) {
@@ -371,14 +427,6 @@ app.use('/protected_materials', (_req, res) => {
     error: 'Direct file download is disabled to preserve curriculum copyright. View materials read-only inside Gemini Notebook.',
   });
 });
-app.use('/assets/aistudio', (req, res, next) => {
-  if (req.path.toLowerCase().endsWith('.pdf')) {
-    return res.status(403).json({
-      error: 'Direct file download is disabled to preserve curriculum copyright. View materials read-only inside Gemini Notebook.',
-    });
-  }
-  next();
-});
 
 // 0. Copyright-Protected Read-Only Gemini Notebook Materials API
 app.post('/api/materials/store', requireAuth, async (req: AuthRequest, res) => {
@@ -386,16 +434,8 @@ app.post('/api/materials/store', requireAuth, async (req: AuthRequest, res) => {
     if (!req.user?.email) {
       return res.status(403).json({ error: 'Verified email required.' });
     }
-    const sqlUser = await getOrCreateUser({
-      uid: req.user.uid,
-      email: req.user.email,
-    });
-    if (
-      !isServerSuperAdmin(req.user.email) &&
-      sqlUser.role !== 'admin' &&
-      sqlUser.role !== 'super_admin' &&
-      sqlUser.role !== 'teacher'
-    ) {
+    const caller = await resolveCallerRole(req);
+    if (!caller.isAdmin && !caller.isTeacher) {
       return res.status(403).json({ error: 'Only admins and teachers can upload curriculum materials.' });
     }
 
@@ -407,7 +447,7 @@ app.post('/api/materials/store', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Material content is required.' });
     }
 
-    await upsertProtectedMaterial({
+    await saveProtectedMaterial({
       noteId,
       fileName: String(fileName || 'Curriculum Material').slice(0, 200),
       mimeType: String(mimeType || 'application/pdf').slice(0, 120),
@@ -440,12 +480,10 @@ app.get('/api/materials/read/:noteId', async (req, res) => {
 
     // All uploaded notes require authenticated Firebase session; Week 01 sample preview is allowed read-only on login screen
     if (noteId !== 'note_be_whole_week_01') {
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Sign in required to read Gemini Notebook materials.' });
+      const reader = await getOptionalUser(req);
+      if (!reader) {
+        return res.status(401).json({ error: 'Sign in to read this material.' });
       }
-      const token = authHeader.split('Bearer ')[1];
-      await adminAuth.verifyIdToken(token);
     }
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -455,16 +493,9 @@ app.get('/api/materials/read/:noteId', async (req, res) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
     res.setHeader('Content-Disposition', 'inline');
 
-    const stored = await getProtectedMaterial(noteId).catch(() => null);
-    if (stored && (stored.contentBase64 || stored.rawText)) {
-      return res.json({
-        noteId: stored.noteId,
-        fileName: stored.fileName,
-        mimeType: stored.mimeType,
-        dataBase64: stored.contentBase64,
-        rawText: stored.rawText,
-        readOnly: true,
-      });
+    const stored = await loadProtectedMaterial(noteId).catch(() => null);
+    if (stored && (stored.dataBase64 || stored.rawText)) {
+      return res.json({ ...stored, readOnly: true });
     }
 
     if (noteId === 'note_be_whole_week_01') {
@@ -499,9 +530,7 @@ app.get('/api/materials/read/:noteId', async (req, res) => {
 // 1. Bilingual AI Academy Chatbox (with live academy search & context; rate-limited for guest preview)
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    if (!checkPublicAiRateLimit(req, 30, 5 * 60 * 1000)) {
-      return res.status(429).json({ error: 'Too many requests. Please wait a moment and try again.' });
-    }
+    if (!(await guardOpenAiEndpoint(req, res, 30, 10))) return;
     const {
       message,
       history = [],
@@ -565,9 +594,7 @@ Be concise, accurate, and grounded in the live academy records provided above wh
 // 2. English <-> Vietnamese Translation (rate-limited for visitor drawer & authenticated users)
 app.post('/api/ai/translate', async (req, res) => {
   try {
-    if (!checkPublicAiRateLimit(req, 35, 5 * 60 * 1000)) {
-      return res.status(429).json({ error: 'Too many translation requests. Please wait a moment.' });
-    }
+    if (!(await guardOpenAiEndpoint(req, res, 35, 10))) return;
     const { text, targetLang = 'vi', context = 'academy communication' } = req.body ?? {};
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Text to translate is required.' });
@@ -804,7 +831,7 @@ Include 4 scenes and 2 actors per scene with well-spaced x positions (e.g. 0.28 
     if (geminiAi) {
       try {
         const response = await geminiAi.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model: STORY_MODEL,
           contents: userPrompt,
           config: {
             systemInstruction: systemPrompt,
@@ -946,13 +973,6 @@ app.post('/api/ai/tts', requireAuth, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Text is required for voice narration.' });
     }
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: 'Natural AI storyteller voice is not configured yet. Check GEMINI_API_KEY in Settings > Secrets.',
-      });
-    }
-
     const safeText = text.trim().slice(0, 800);
     const chosenVoice = VALID_TTS_VOICES.has(String(voiceName)) ? String(voiceName) : 'Kore';
     const defaultStyle =
@@ -962,54 +982,34 @@ app.post('/api/ai/tts', requireAuth, async (req: AuthRequest, res) => {
     const chosenStyle =
       typeof style === 'string' && style.trim() ? style.trim().slice(0, 180) : defaultStyle;
 
-    const ttsKey = AiResponseCache.key(safeText, chosenVoice, chosenStyle);
-    const cachedAudio = ttsCache.get(ttsKey);
-    if (cachedAudio) {
-      res.setHeader('X-LiLab-Cache', 'hit');
-      return res.json(cachedAudio);
+    // V2 cost control: memory cache, then Cloud Storage, then (only if both miss) a paid Gemini call.
+    const ttsKey = narrationKey(safeText, chosenVoice, chosenStyle);
+    const memoryHit = ttsCache.get(ttsKey);
+    if (memoryHit) {
+      res.setHeader('X-LiLab-Cache', 'memory');
+      return res.json(memoryHit);
+    }
+    const storedHit = await loadStoredNarration(ttsKey);
+    if (storedHit) {
+      ttsCache.set(ttsKey, storedHit, storedHit.audioBase64.length);
+      res.setHeader('X-LiLab-Cache', 'storage');
+      return res.json(storedHit);
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash-lite-tts',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: safeText,
-              speechMetadata: {
-                style: chosenStyle,
-              },
-            },
-          ],
-        },
-      ],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: chosenVoice },
-          },
-        },
-      },
-    });
-
-    const audioPart = response.candidates?.[0]?.content?.parts?.find(
-      (p) => p.inlineData?.data
-    );
-    const base64Audio = audioPart?.inlineData?.data;
-    if (!base64Audio) {
-      return res.status(502).json({ error: 'No audio was returned by the voice narrator.' });
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error: 'Narration is not set up yet. Add GEMINI_API_KEY in Settings > Secrets.',
+      });
     }
 
-    // Unary gemini-3.8-flash-lite-tts returns a complete WAV file (audio/wav, 24kHz mono 16-bit)
-    const ttsPayload = {
-      audioBase64: base64Audio,
-      mimeType: audioPart?.inlineData?.mimeType || 'audio/wav',
-      voiceName: chosenVoice,
-    };
-    ttsCache.set(ttsKey, ttsPayload, base64Audio.length);
-    res.json(ttsPayload);
+    const clip = await synthesizeNarration(ai, safeText, chosenVoice, chosenStyle);
+    if (!clip) {
+      return res.status(502).json({ error: 'The narrator returned no audio. Try again.' });
+    }
+    ttsCache.set(ttsKey, clip, clip.audioBase64.length);
+    void storeNarration(ttsKey, clip);
+    res.json(clip);
   } catch (error) {
     if (isGeminiAuthError(error)) {
       markGeminiKeyRejected();
@@ -1101,7 +1101,7 @@ SCORING RULES (be fair, honest, and kid-friendly):
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model: SPEAKING_MODEL,
           contents: {
             parts: [
               {
@@ -1507,217 +1507,6 @@ app.post('/api/billing/send-reminder-zalo', requireAuth, async (req: AuthRequest
   } catch (error) {
     console.error('Payment reminder Zalo error:', error);
     res.status(500).json({ error: 'Failed to dispatch Zalo payment reminder.' });
-  }
-});
-
-// 6. Cloud SQL (PostgreSQL) Persistence Endpoints (Firebase Auth protected)
-const VALID_SQL_COLLECTIONS = new Set<AcademyCollectionName>([
-  'users',
-  'user_invites',
-  'teachers',
-  'students',
-  'programs',
-  'classes',
-  'schedules',
-  'assessments',
-  'gemini_notes',
-  'invoices',
-  'payables',
-  'enrollments',
-  'payment_methods',
-  'quick_notes',
-]);
-
-// Helper: enforce strict role & record ownership for SQL persistence endpoints
-function authorizeSqlUpsert(
-  caller: Awaited<ReturnType<typeof resolveCallerRole>>,
-  col: AcademyCollectionName,
-  id: string,
-  data: Record<string, unknown>
-): { allowed: boolean; sanitizedData: Record<string, unknown>; reason?: string } {
-  if (caller.isAdmin) {
-    // Only Super Admins can assign the super_admin role
-    if (col === 'users' && data.role === 'super_admin' && !caller.isSuperAdmin) {
-      return { allowed: false, sanitizedData: data, reason: 'Only Super Admins can assign super_admin role.' };
-    }
-    return { allowed: true, sanitizedData: data };
-  }
-
-  if (col === 'users') {
-    if (id !== caller.uid) {
-      return { allowed: false, sanitizedData: data, reason: 'Users may only update their own profile.' };
-    }
-    // Prevent self-escalation: force server-verified role & email
-    const safeSelfRole =
-      caller.role === 'teacher' || caller.role === 'student' || caller.role === 'parent'
-        ? caller.role
-        : 'parent';
-    return {
-      allowed: true,
-      sanitizedData: {
-        ...data,
-        uid: caller.uid,
-        email: caller.email,
-        role: safeSelfRole,
-      },
-    };
-  }
-
-  if (caller.isTeacher) {
-    if (col === 'quick_notes' || col === 'assessments') {
-      return {
-        allowed: true,
-        sanitizedData: { ...data, teacherUid: caller.uid, teacherEmail: caller.email },
-      };
-    }
-    if (col === 'schedules') {
-      const schedEmail = String(data.teacherEmail || '').trim().toLowerCase();
-      if (schedEmail && schedEmail !== caller.email) {
-        return { allowed: false, sanitizedData: data, reason: 'Teachers may only update their own schedules.' };
-      }
-      return { allowed: true, sanitizedData: { ...data, teacherEmail: caller.email } };
-    }
-    if (col === 'teachers') {
-      const tEmail = String(data.teacherEmail || '').trim().toLowerCase();
-      if (tEmail !== caller.email) {
-        return { allowed: false, sanitizedData: data, reason: 'Teachers may only update their own profile.' };
-      }
-      return { allowed: true, sanitizedData: data };
-    }
-    if (col === 'students') {
-      return { allowed: true, sanitizedData: data };
-    }
-    return { allowed: false, sanitizedData: data, reason: 'Teachers are not authorized to modify this collection.' };
-  }
-
-  // Parent / Student self-owned records only
-  if (col === 'payment_methods' || col === 'enrollments' || col === 'invoices') {
-    const recParentEmail = String(data.parentEmail || '').trim().toLowerCase();
-    const recParentUid = String(data.parentUid || '').trim();
-    if (recParentEmail === caller.email || (recParentUid && recParentUid === caller.uid)) {
-      return {
-        allowed: true,
-        sanitizedData: {
-          ...data,
-          parentEmail: caller.email,
-          parentUid: caller.uid,
-        },
-      };
-    }
-    return { allowed: false, sanitizedData: data, reason: 'Parents may only update their own billing/enrollment records.' };
-  }
-
-  return { allowed: false, sanitizedData: data, reason: 'Admin privileges required to modify this collection.' };
-}
-
-app.post('/api/sql/upsert', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const { collection: col, id, data } = req.body ?? {};
-    if (!col || !VALID_SQL_COLLECTIONS.has(col) || !id || typeof data !== 'object' || data === null) {
-      return res.status(400).json({ error: 'Valid collection, id, and data are required.' });
-    }
-    const caller = await resolveCallerRole(req);
-    const check = authorizeSqlUpsert(caller, col, String(id), data as Record<string, unknown>);
-    if (!check.allowed) {
-      return res.status(403).json({ error: `Forbidden: ${check.reason || 'Insufficient privileges.'}` });
-    }
-    await upsertAcademyRecord(col, String(id), check.sanitizedData);
-    res.json({ ok: true });
-  } catch (error: unknown) {
-    console.error('SQL upsert route error:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to store record in SQL.';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.post('/api/sql/upsert-batch', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const caller = await resolveCallerRole(req);
-    if (!caller.isAdmin) {
-      return res.status(403).json({ error: 'Forbidden: Admin privileges required for batch SQL sync.' });
-    }
-    const { items } = req.body ?? {};
-    if (!Array.isArray(items)) {
-      return res.status(400).json({ error: 'Items array is required.' });
-    }
-    let processed = 0;
-    for (const item of items.slice(0, 150)) {
-      if (!item || !VALID_SQL_COLLECTIONS.has(item.collection) || !item.id || typeof item.data !== 'object' || item.data === null) {
-        continue;
-      }
-      const check = authorizeSqlUpsert(caller, item.collection, String(item.id), item.data as Record<string, unknown>);
-      if (!check.allowed) continue;
-      await upsertAcademyRecord(item.collection, String(item.id), check.sanitizedData);
-      processed += 1;
-    }
-    res.json({ ok: true, count: processed });
-  } catch (error: unknown) {
-    console.error('SQL batch upsert route error:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to sync records to SQL.';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.delete('/api/sql/record/:col/:id', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const col = req.params.col as AcademyCollectionName;
-    const id = req.params.id;
-    if (!VALID_SQL_COLLECTIONS.has(col) || !id) {
-      return res.status(400).json({ error: 'Invalid collection or record id.' });
-    }
-    const caller = await resolveCallerRole(req);
-    if (col === 'users') {
-      if (!caller.isSuperAdmin) {
-        return res.status(403).json({ error: 'Forbidden: Only Super Admins may remove user records.' });
-      }
-    } else if (!caller.isAdmin) {
-      const teacherDeletable = caller.isTeacher && (col === 'quick_notes' || col === 'assessments');
-      if (!teacherDeletable) {
-        return res.status(403).json({ error: 'Forbidden: Admin privileges required to delete records.' });
-      }
-    }
-    await deleteAcademyRecord(col, id);
-    res.json({ ok: true });
-  } catch (error: unknown) {
-    console.error('SQL delete route error:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to remove record from SQL.';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.get('/api/sql/overview', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    if (!req.user?.email) {
-      return res.status(403).json({ error: 'Verified email required.' });
-    }
-    const caller = await resolveCallerRole(req);
-    if (!caller.isAdmin) {
-      return res.status(403).json({ error: 'Admin privileges required.' });
-    }
-    const snapshot = await getSqlAcademySnapshotForAdmin();
-    res.json(snapshot);
-  } catch (error: unknown) {
-    console.error('SQL overview route error:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to load SQL overview.';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.post('/api/sql/reset-all', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    if (!req.user?.email) {
-      return res.status(403).json({ error: 'Verified email required.' });
-    }
-    const caller = await resolveCallerRole(req);
-    if (!caller.isAdmin) {
-      return res.status(403).json({ error: 'Admin privileges required.' });
-    }
-    await resetAllAcademySqlRecords(req.user.uid, SERVER_SUPER_ADMIN_EMAILS);
-    res.json({ ok: true });
-  } catch (error: unknown) {
-    console.error('SQL reset-all route error:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to reset SQL storage.';
-    res.status(500).json({ error: msg });
   }
 });
 

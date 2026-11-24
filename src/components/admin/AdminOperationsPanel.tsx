@@ -20,7 +20,6 @@ import {
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { biText } from '../../i18n';
 import { isSuperAdminEmail } from '../../services/seedData';
-import { resetAllSqlData, syncBatchToSql } from '../../services/sqlSyncClient';
 import { PanelCard, SectionHeader } from '../ui/Primitives';
 import type { LangCode, UserProfile } from '../../types';
 
@@ -191,12 +190,6 @@ export const AdminOperationsPanel: React.FC<AdminOperationsPanelProps> = ({
     setBusyAction('restore_backup_data');
     try {
       let restoredCount = 0;
-      const sqlBatch: Array<{
-        collection: Parameters<typeof syncBatchToSql>[0][number]['collection'];
-        id: string;
-        data: Record<string, unknown>;
-      }> = [];
-
       for (const colName of BACKUP_COLLECTIONS) {
         const records = restorePayload.collections[colName];
         if (!Array.isArray(records)) continue;
@@ -217,23 +210,8 @@ export const AdminOperationsPanel: React.FC<AdminOperationsPanelProps> = ({
             },
             { merge: true }
           );
-          if (
-            colName !== 'issued_certificates' &&
-            colName !== 'student_mind_maps' &&
-            colName !== 'student_study_notes'
-          ) {
-            sqlBatch.push({
-              collection: colName,
-              id: docId,
-              data: { id: docId, ...cleanPayload },
-            });
-          }
           restoredCount += 1;
         }
-      }
-
-      if (sqlBatch.length > 0) {
-        await syncBatchToSql(sqlBatch);
       }
 
       setRestorePayload(null);
@@ -321,7 +299,6 @@ export const AdminOperationsPanel: React.FC<AdminOperationsPanelProps> = ({
         }
       }
 
-      await resetAllSqlData();
       setConfirmResetAll(false);
       onAfterResetAll();
 

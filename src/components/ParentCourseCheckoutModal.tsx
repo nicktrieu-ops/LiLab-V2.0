@@ -17,7 +17,6 @@ import {
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { biText, formatVnd } from '../i18n';
 import { buildVietQrImageUrl } from '../services/bankingQr';
-import { syncRecordToSql } from '../services/sqlSyncClient';
 import type {
   AcademyBankConfig,
   LangCode,
@@ -182,7 +181,6 @@ export const ParentCourseCheckoutModal: React.FC<ParentCourseCheckoutModalProps>
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('payment_methods', pmId, pmPayload);
       }
 
       // 2. Create Enrollment record (enrolled immediately if paid now, pending if pay later)
@@ -214,7 +212,6 @@ export const ParentCourseCheckoutModal: React.FC<ParentCourseCheckoutModalProps>
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('enrollments', enrId, enrPayload);
 
       // 3. Create Tuition Invoice immediately so Admin Accounts & Banking Dashboard sees the payment or due balance right away
       const invId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -250,7 +247,6 @@ export const ParentCourseCheckoutModal: React.FC<ParentCourseCheckoutModalProps>
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('invoices', invId, invPayload);
 
       onSuccess(
         isPayingNow

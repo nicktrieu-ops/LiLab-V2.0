@@ -11,6 +11,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { readCatalogue } from '../services/catalogueReads';
 import { biText } from '../i18n';
 import { isSuperAdminEmail } from '../services/seedData';
 import type { StudentTab } from '../config/portalNavigation';
@@ -159,7 +160,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'gemini_notes',
         collection(db, 'gemini_notes'),
         (snap) => {
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as GeminiNote));

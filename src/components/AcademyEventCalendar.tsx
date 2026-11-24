@@ -44,7 +44,6 @@ import { auth, db } from '../firebase';
 import { biText } from '../i18n';
 import { isSuperAdminEmail, seedLilabMasterSchedule } from '../services/seedData';
 import { buildLilabMasterSchedules } from '../data/lilabMasterSchedule';
-import { deleteRecordFromSql, syncRecordToSql } from '../services/sqlSyncClient';
 import {
   CalendarTimeGridView,
   getWeekDaysForYmd,
@@ -1242,7 +1241,6 @@ export const AcademyEventCalendar: React.FC<AcademyEventCalendarProps> = ({
             updatedAt: serverTimestamp()
           });
         }
-        await syncRecordToSql('schedules', ev.scheduleId, schedulePayload);
 
         setLastMoveUndo({
           kind: 'weekly_schedule_updated',
@@ -1379,7 +1377,6 @@ export const AcademyEventCalendar: React.FC<AcademyEventCalendarProps> = ({
           ...lastMoveUndo.previousData,
           updatedAt: serverTimestamp()
         });
-        await syncRecordToSql('schedules', lastMoveUndo.docId, lastMoveUndo.previousData);
       }
       const restoredName = lastMoveUndo.label;
       setLastMoveUndo(null);
@@ -1470,7 +1467,6 @@ export const AcademyEventCalendar: React.FC<AcademyEventCalendarProps> = ({
             updatedAt: serverTimestamp()
           });
         }
-        await syncRecordToSql('schedules', editingScheduleId, schedulePayload);
         setShowEventModal(false);
         flash(
           biText(
@@ -1609,7 +1605,6 @@ export const AcademyEventCalendar: React.FC<AcademyEventCalendarProps> = ({
         );
       } else if (ev.source === 'schedule' && deleteMode === 'weekly_series' && ev.scheduleId) {
         await deleteDoc(doc(db, 'schedules', ev.scheduleId));
-        await deleteRecordFromSql('schedules', ev.scheduleId);
         flash(
           biText(
             lang,

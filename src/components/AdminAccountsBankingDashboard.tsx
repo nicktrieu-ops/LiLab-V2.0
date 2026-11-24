@@ -41,7 +41,6 @@ import {
   resolveVietBankCode,
   VIETNAM_BANK_PRESETS,
 } from '../services/bankingQr';
-import { deleteRecordFromSql, syncRecordToSql } from '../services/sqlSyncClient';
 import type {
   AcademyBankConfig,
   LangCode,
@@ -314,7 +313,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('invoices', id, payload);
       setShowIssueInvoiceForm(false);
       onFlash(
         biText(
@@ -348,7 +346,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         patch.paidAt = new Date().toISOString().slice(0, 19);
       }
       await updateDoc(doc(db, 'invoices', inv.id), patch);
-      await syncRecordToSql('invoices', inv.id, { ...inv, ...patch, updatedAt: undefined });
       onFlash(
         biText(
           lang,
@@ -367,7 +364,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
     setBusyAction(`inv_del_${invId}`);
     try {
       await deleteDoc(doc(db, 'invoices', invId));
-      await deleteRecordFromSql('invoices', invId);
       onFlash(biText(lang, 'Invoice deleted.', 'Đã xóa hóa đơn.'));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `invoices/${invId}`);
@@ -424,13 +420,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         reminderChannel: nextChannel,
         lastReminderAt: nowIso,
         updatedAt: serverTimestamp(),
-      });
-      await syncRecordToSql('invoices', reminderInvoice.id, {
-        ...reminderInvoice,
-        status: reminderInvoice.status === 'overdue' ? 'overdue' : 'reminder_sent',
-        reminderNote: note,
-        reminderChannel: nextChannel,
-        lastReminderAt: nowIso,
       });
 
       const logId = makeId('remlog');
@@ -515,11 +504,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         updatePayload.parentPhone = reminderZaloPhone.trim().slice(0, 40);
       }
       await updateDoc(doc(db, 'invoices', reminderInvoice.id), updatePayload);
-      await syncRecordToSql('invoices', reminderInvoice.id, {
-        ...reminderInvoice,
-        ...updatePayload,
-        updatedAt: undefined,
-      });
 
       const logId = makeId('remlog');
       const zaloLogPayload: Record<string, unknown> = {
@@ -648,7 +632,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('payables', id, payload);
 
       // If linked to a teacher profile and toggle is checked, persist bank & salary info on the teacher record
       if (payType === 'teacher_payroll' && payTeacherPick && saveBankToTeacher) {
@@ -665,7 +648,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
             ...teacherPatch,
             updatedAt: serverTimestamp(),
           });
-          await syncRecordToSql('teachers', pickedTeacher.id, { ...pickedTeacher, ...teacherPatch });
         }
       }
 
@@ -694,7 +676,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('payables', p.id, { ...p, status: nextStatus });
       onFlash(
         biText(
           lang,
@@ -713,7 +694,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
     setBusyAction(`pay_del_${id}`);
     try {
       await deleteDoc(doc(db, 'payables', id));
-      await deleteRecordFromSql('payables', id);
       onFlash(biText(lang, 'Payable deleted.', 'Đã xóa khoản chi.'));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `payables/${id}`);
@@ -726,7 +706,6 @@ export const AdminAccountsBankingDashboard: React.FC<AdminAccountsBankingDashboa
     setBusyAction(`pm_del_${id}`);
     try {
       await deleteDoc(doc(db, 'payment_methods', id));
-      await deleteRecordFromSql('payment_methods', id);
       onFlash(biText(lang, 'Parent banking profile removed.', 'Đã xóa thông tin ngân hàng phụ huynh.'));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `payment_methods/${id}`);

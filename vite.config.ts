@@ -2,16 +2,40 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(() => {
+// `--mode preview` builds a self-contained clickable demo: Firestore and Auth are replaced by
+// in-browser stand-ins with sample data (see preview/), and asset paths become relative so the
+// build can be hosted from any folder.
+function relativeAssetPaths(): Plugin {
   return {
-    plugins: [react(), tailwindcss()],
+    name: 'lilab-preview-relative-assets',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]src[\\/].*\.(tsx?|jsx?)$/.test(id)) return null;
+      return code
+        .replace(/(['"`])\/api\/media\//g, '$1./assets/media/')
+        .replace(/(['"`])\/assets\//g, '$1./assets/');
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const isPreview = mode === 'preview';
+  return {
+    base: isPreview ? './' : '/',
+    plugins: [react(), tailwindcss(), ...(isPreview ? [relativeAssetPaths()] : [])],
     resolve: {
       alias: {
         '@': path.resolve(rootDir, '.'),
+        ...(isPreview
+          ? {
+              'firebase/firestore': path.resolve(rootDir, 'preview/mockFirestore.ts'),
+              'firebase/auth': path.resolve(rootDir, 'preview/mockAuth.ts'),
+            }
+          : {}),
       },
     },
     build: {

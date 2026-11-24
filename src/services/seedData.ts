@@ -1,6 +1,5 @@
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { syncRecordToSql } from './sqlSyncClient';
 import { buildLilabMasterSchedules } from '../data/lilabMasterSchedule';
 
 export const SUPER_ADMIN_EMAILS = [
@@ -355,7 +354,6 @@ export async function ensureSpecialtyProgramsSeeded(): Promise<number> {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('programs', id, rest);
       added++;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `programs/${id}`);
@@ -377,7 +375,6 @@ export async function ensureSignatureProgramsSeeded(): Promise<number> {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('programs', id, rest);
       added++;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `programs/${id}`);
@@ -459,7 +456,6 @@ export async function seedAcademyBaseline(adminUid: string, adminEmail: string):
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('programs', id, rest);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `programs/${id}`);
     }
@@ -507,7 +503,6 @@ export async function seedAcademyBaseline(adminUid: string, adminEmail: string):
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await syncRecordToSql('gemini_notes', 'note_be_whole_week_01', week01Note);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'gemini_notes/note_be_whole_week_01');
   }
@@ -533,7 +528,6 @@ export async function seedAcademyBaseline(adminUid: string, adminEmail: string):
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    await syncRecordToSql('payables', 'bank_lilab_primary', bankConfig);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'payables/bank_lilab_primary');
   }
@@ -570,7 +564,6 @@ export async function seedLilabMasterSchedule(
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('schedules', id, rest);
       created += 1;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `schedules/${id}`);

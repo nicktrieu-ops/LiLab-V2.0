@@ -1,4 +1,4 @@
-import { auth } from '../firebase';
+import { auth, getAppCheckHeader } from '../firebase';
 import type { LangCode } from '../types';
 
 export interface ChatHistoryItem {
@@ -7,7 +7,7 @@ export interface ChatHistoryItem {
 }
 
 async function getJsonAuthHeaders(required = false): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await getAppCheckHeader()) };
   const user = auth.currentUser;
   if (user) {
     const token = await user.getIdToken();

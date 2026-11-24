@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import {
   BellRing,
   Building2,
@@ -138,8 +138,9 @@ export const AdminTransactionLedger: React.FC<AdminTransactionLedgerProps> = ({
       ? collection(db, 'invoices')
       : query(collection(db, 'invoices'), where('adminUids', 'array-contains', currentUser.uid));
 
+    // V2: the reminder log only grows; show the latest 300 instead of reading every log ever sent
     const logRef = isFullAdmin
-      ? collection(db, 'reminder_logs')
+      ? query(collection(db, 'reminder_logs'), orderBy('sentAt', 'desc'), limit(300))
       : query(collection(db, 'reminder_logs'), where('adminUids', 'array-contains', currentUser.uid));
 
     const unsubInv = onSnapshot(

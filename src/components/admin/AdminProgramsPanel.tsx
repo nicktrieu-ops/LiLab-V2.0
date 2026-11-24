@@ -33,7 +33,6 @@ import {
   SIGNATURE_POPUP_PROGRAMS,
   SPECIALTY_TALENT_PROGRAMS,
 } from '../../services/seedData';
-import { deleteRecordFromSql, syncRecordToSql } from '../../services/sqlSyncClient';
 import { EmptyState, PanelCard, SectionHeader } from '../ui/Primitives';
 import { PCE_KIDS_CURRICULUM, type PceLevelCourse } from '../../data/pceCurriculumData';
 import type { LangCode, ProgramCourse, TeacherProfile } from '../../types';
@@ -149,7 +148,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('programs', progId, payload as unknown as Record<string, unknown>);
       onFlash(
         biText(
           lang,
@@ -228,7 +226,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('programs', id, rest);
       }
       onFlash(
         biText(
@@ -254,7 +251,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('programs', id, rest);
       }
       onFlash(
         biText(
@@ -353,7 +349,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
           updatedAt: serverTimestamp(),
         });
       }
-      await syncRecordToSql('programs', id, payload);
 
       const shouldOpenPopup = !isEditing && progShowInPopup && progIsActive;
       handleResetProgramForm();
@@ -396,7 +391,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
         [field]: nextValue,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('programs', prog.id, { ...prog, [field]: nextValue });
       onFlash(
         field === 'showInPromoPopup'
           ? nextValue
@@ -417,7 +411,6 @@ export const AdminProgramsPanel: React.FC<AdminProgramsPanelProps> = ({
     setBusyAction(`prog_del_${progId}`);
     try {
       await deleteDoc(doc(db, 'programs', progId));
-      await deleteRecordFromSql('programs', progId);
       if (editingProgramId === progId) handleResetProgramForm();
       setConfirmDeleteProgId(null);
       onFlash(biText(lang, 'Program removed from LiLab catalog.', 'Đã xóa khóa học khỏi danh mục LiLab.'));

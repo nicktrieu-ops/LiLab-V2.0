@@ -61,7 +61,6 @@ import {
   resolveActiveBankConfig,
 } from '../services/bankingQr';
 import { isSuperAdminEmail, seedAcademyBaseline } from '../services/seedData';
-import { deleteRecordFromSql, syncBatchToSql, syncRecordToSql } from '../services/sqlSyncClient';
 import { PCE_KIDS_CURRICULUM } from '../data/pceCurriculumData';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ProfileAvatar, ProfilePhotoUploader } from './ProfileAvatar';
@@ -366,7 +365,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                   }).catch(() => {});
-                  void syncRecordToSql('users', u.uid, { ...u, role: 'super_admin' }).catch(() => {});
                 }
               });
             }
@@ -436,29 +434,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     return () => unsubs.forEach((u) => u());
   }, [isFullAdmin, safeCurrentUser.uid]);
 
-  // Silent background snapshot mirror to Cloud SQL so existing Firestore data stays synced
-  useEffect(() => {
-    const items: Array<{ collection: Parameters<typeof syncBatchToSql>[0][number]['collection']; id: string; data: Record<string, unknown> }> = [];
-    for (const u of users) items.push({ collection: 'users', id: u.uid, data: u as unknown as Record<string, unknown> });
-    for (const inv of invites) items.push({ collection: 'user_invites', id: inv.id, data: inv as unknown as Record<string, unknown> });
-    for (const tc of teachers) items.push({ collection: 'teachers', id: tc.id, data: tc as unknown as Record<string, unknown> });
-    for (const st of students) items.push({ collection: 'students', id: st.id, data: st as unknown as Record<string, unknown> });
-    for (const pr of programs) items.push({ collection: 'programs', id: pr.id, data: pr as unknown as Record<string, unknown> });
-    for (const cl of classes) items.push({ collection: 'classes', id: cl.id, data: cl as unknown as Record<string, unknown> });
-    for (const sc of schedules) items.push({ collection: 'schedules', id: sc.id, data: sc as unknown as Record<string, unknown> });
-    for (const as of assessments) items.push({ collection: 'assessments', id: as.id, data: as as unknown as Record<string, unknown> });
-    for (const gn of geminiNotes) items.push({ collection: 'gemini_notes', id: gn.id, data: gn as unknown as Record<string, unknown> });
-    for (const iv of invoices) items.push({ collection: 'invoices', id: iv.id, data: iv as unknown as Record<string, unknown> });
-    for (const py of payables) items.push({ collection: 'payables', id: py.id, data: py as unknown as Record<string, unknown> });
-    for (const pm of paymentMethods) items.push({ collection: 'payment_methods', id: pm.id, data: pm as unknown as Record<string, unknown> });
-    for (const en of enrollments) items.push({ collection: 'enrollments', id: en.id, data: en as unknown as Record<string, unknown> });
-    if (items.length === 0) return;
-    const timer = setTimeout(() => {
-      syncBatchToSql(items);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, [users, invites, teachers, students, programs, classes, schedules, assessments, geminiNotes, invoices, payables, paymentMethods, enrollments]);
-
   const flash = (msg: string) => {
     setStatusBanner(msg);
     setTimeout(() => setStatusBanner(null), 4000);
@@ -505,7 +480,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('user_invites', id, invitePayload);
       if (inviteRole === 'teacher') {
         const tchId = makeId('tch');
         const tchPayload = {
@@ -525,7 +499,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('teachers', tchId, tchPayload);
       }
       setInviteEmail('');
       setInviteName('');
@@ -562,7 +535,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('teachers', id, payload);
       setTeacherEmail('');
       setTeacherName('');
       setTeacherPhone('');
@@ -605,7 +577,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('students', id, payload);
       setStudentName('');
       setStudentEmail('');
       setStudentPhotoUrl('');
@@ -620,10 +591,9 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     }
   };
 
-  const handleDeleteDoc = async (colName: Parameters<typeof deleteRecordFromSql>[0], id: string) => {
+  const handleDeleteDoc = async (colName: string, id: string) => {
     try {
       await deleteDoc(doc(db, colName, id));
-      await deleteRecordFromSql(colName, id);
       if (colName === 'assessments') {
         if (selectedReportId === id) setSelectedReportId('cohort_avg');
         if (viewingReportId === id) setViewingReportId(null);
@@ -677,7 +647,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('teachers', tc.id, { ...tc, ...updates });
       setEditingTeacherId(null);
       flash(biText(lang, `Updated teacher ${updates.fullName}.`, `Đã cập nhật giáo viên ${updates.fullName}.`));
     } catch (err) {
@@ -728,7 +697,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('students', st.id, { ...st, ...updates });
       setEditingStudentId(null);
       flash(biText(lang, `Updated student & parent details for ${editStudentForm.fullName}.`, `Đã cập nhật hồ sơ ${editStudentForm.fullName}.`));
     } catch (err) {
@@ -763,7 +731,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('user_invites', inv.id, { ...inv, ...updates });
       setEditingInviteId(null);
       flash(biText(lang, `Updated invite for ${updates.email}.`, `Đã cập nhật lời mời ${updates.email}.`));
     } catch (err) {
@@ -822,7 +789,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
       } else {
         await deleteDoc(doc(db, 'admins', u.uid)).catch(() => {});
       }
-      await syncRecordToSql('users', u.uid, { ...u, ...updates });
       setEditingUserUid(null);
       flash(biText(lang, `Updated user ${updates.displayName}.`, `Đã cập nhật tài khoản ${updates.displayName}.`));
     } catch (err) {
@@ -887,7 +853,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('assessments', a.id, { ...a, ...updates });
 
       const stu = students.find((s) => s.id === a.studentId);
       if (stu) {
@@ -895,11 +860,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           cefrLevel: editReportForm.cefrLevel,
           cefrModifier: editReportForm.cefrModifier,
           updatedAt: serverTimestamp(),
-        });
-        await syncRecordToSql('students', stu.id, {
-          ...stu,
-          cefrLevel: editReportForm.cefrLevel,
-          cefrModifier: editReportForm.cefrModifier,
         });
       }
       setEditingReportId(null);
@@ -918,7 +878,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     try {
       for (const enr of enrollments) {
         await deleteDoc(doc(db, 'enrollments', enr.id));
-        await deleteRecordFromSql('enrollments', enr.id);
       }
       flash(
         biText(
@@ -941,7 +900,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
     try {
       for (const asm of assessments) {
         await deleteDoc(doc(db, 'assessments', asm.id));
-        await deleteRecordFromSql('assessments', asm.id);
       }
       setSelectedReportId('cohort_avg');
       setViewingReportId(null);
@@ -1006,7 +964,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('classes', id, payload);
       setClassName('');
       flash(biText(lang, 'Class cohort created.', 'Đã tạo lớp học mới.'));
     } catch (err) {
@@ -1028,7 +985,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         studentIds: nextStudentIds,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('classes', cls.id, { ...cls, studentIds: nextStudentIds });
 
       const nextClasses = Array.from(new Set([...(stu.enrolledClassIds || []), cls.id])).slice(0, 12);
       const nextTeachers = Array.from(new Set([...(stu.assignedTeacherEmails || []), cls.teacherEmail])).slice(0, 12);
@@ -1036,11 +992,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         enrolledClassIds: nextClasses,
         assignedTeacherEmails: nextTeachers,
         updatedAt: serverTimestamp(),
-      });
-      await syncRecordToSql('students', stu.id, {
-        ...stu,
-        enrolledClassIds: nextClasses,
-        assignedTeacherEmails: nextTeachers,
       });
       flash(biText(lang, `Assigned ${stu.fullName} to ${cls.name}.`, `Đã xếp ${stu.fullName} vào lớp ${cls.name}.`));
     } catch (err) {
@@ -1057,7 +1008,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         studentIds: nextStudentIds,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('classes', cls.id, { ...cls, studentIds: nextStudentIds });
 
       if (stu) {
         const nextEnrolled = (stu.enrolledClassIds || []).filter((cid) => cid !== cls.id);
@@ -1072,11 +1022,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           enrolledClassIds: nextEnrolled,
           assignedTeacherEmails: remainingTeachers,
           updatedAt: serverTimestamp(),
-        });
-        await syncRecordToSql('students', stu.id, {
-          ...stu,
-          enrolledClassIds: nextEnrolled,
-          assignedTeacherEmails: remainingTeachers,
         });
       }
       flash(
@@ -1100,7 +1045,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         role: 'parent',
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('users', u.uid, { ...u, role: 'parent' });
       flash(
         biText(
           lang,
@@ -1145,7 +1089,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('schedules', id, payload);
       setSchedTopicEn('');
       setSchedTopicVi('');
       flash(biText(lang, 'Schedule session added.', 'Đã thêm lịch học.'));
@@ -1214,7 +1157,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('gemini_notes', id, payload);
       if (noteFileBase64 || noteRawText) {
         await storeProtectedMaterial({
           noteId: id,
@@ -1250,7 +1192,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         status: 'enrolled',
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('enrollments', enr.id, { ...enr, status: 'enrolled' });
       const prog = programs.find((p) => p.id === enr.programId);
       const invId = makeId('inv');
       const invPayload = {
@@ -1271,7 +1212,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('invoices', invId, invPayload);
       flash(biText(lang, 'Enrollment approved & invoice generated.', 'Đã duyệt đăng ký & tạo hóa đơn học phí.'));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `enrollments/${enr.id}`);
@@ -1287,7 +1227,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('enrollments', enr.id, { ...enr, status: nextStatus });
       flash(
         biText(
           lang,
@@ -1595,14 +1534,6 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
           }
 
           await updateDoc(doc(db, 'invoices', inv.id), updatePayload);
-          await syncRecordToSql('invoices', inv.id, {
-            ...inv,
-            status: updatePayload.status,
-            reminderNote: note,
-            reminderChannel: nextChannel,
-            lastReminderAt: nowIso,
-            ...(rawPhone ? { parentPhone: rawPhone.slice(0, 40) } : {}),
-          });
 
           const reminderLogId = makeId('remlog');
           const reminderLogPayload: Record<string, unknown> = {

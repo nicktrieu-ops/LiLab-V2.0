@@ -50,6 +50,7 @@ import {
   Users,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { readCatalogue } from '../services/catalogueReads';
 import { biText, formatVnd, TRANSLATIONS } from '../i18n';
 import { sendReportEmail } from '../services/aiClient';
 import { buildVietQrImageUrl, resolveActiveBankConfig } from '../services/bankingQr';
@@ -59,7 +60,6 @@ import {
   SIGNATURE_POPUP_PROGRAMS,
   SPECIALTY_TALENT_PROGRAMS,
 } from '../services/seedData';
-import { syncRecordToSql } from '../services/sqlSyncClient';
 import { ErrorBoundary } from './ErrorBoundary';
 import { HistoricalProgress } from './HistoricalProgress';
 import { ParentCourseDetailModal, type CourseDetailSelection } from './ParentCourseDetailModal';
@@ -344,7 +344,8 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'programs',
         collection(db, 'programs'),
         (snap) => setPrograms(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProgramCourse))),
         (err) => handleFirestoreError(err, OperationType.LIST, 'programs')
@@ -352,7 +353,8 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'gemini_notes',
         collection(db, 'gemini_notes'),
         (snap) => {
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as GeminiNote));
@@ -388,7 +390,8 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'academy_banking',
         collection(db, 'academy_banking'),
         (snap) => setAcademyBankConfigs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AcademyBankConfig))),
         (err) => handleFirestoreError(err, OperationType.LIST, 'academy_banking')
@@ -396,7 +399,8 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'academy_events',
         collection(db, 'academy_events'),
         (snap) => {
           const rows = snap.docs
@@ -529,7 +533,6 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('payment_methods', id, payload);
       setAccountLast4('');
       setParentBranchNotes('');
       flash(
@@ -581,16 +584,6 @@ export const ParentStudentPortal: React.FC<ParentStudentPortalProps> = ({
         updatePayload.parentPhone = (parentBankPhone.trim() || paymentMethods[0]?.parentPhone || '').slice(0, 40);
       }
       await updateDoc(doc(db, 'invoices', inv.id), updatePayload);
-      await syncRecordToSql('invoices', inv.id, {
-        ...inv,
-        paymentMethod: method,
-        paymentReference,
-        status: 'paid',
-        parentUid: currentUser.uid,
-        paidAt,
-        ...(resolvedBank ? { payerBankName: resolvedBank.slice(0, 120) } : {}),
-        ...(resolvedHolder ? { payerAccountHolder: resolvedHolder.slice(0, 120) } : {}),
-      });
       setQrInvoice(null);
       setPayRefInput('');
       setPayerBankForQr('');

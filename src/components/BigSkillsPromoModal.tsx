@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection } from 'firebase/firestore';
 import {
   ArrowRight,
   BookOpen,
@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { db } from '../firebase';
+import { readCatalogue } from '../services/catalogueReads';
 import { biText, formatVnd } from '../i18n';
 import type { LangCode, ProgramCourse } from '../types';
 
@@ -249,7 +250,8 @@ export const BigSkillsPromoModal: React.FC<BigSkillsPromoModalProps> = ({
   // Subscribe to live LiLab programs when modal is open so newly added admin programs appear immediately
   useEffect(() => {
     if (!isOpen) return;
-    const unsub = onSnapshot(
+    const unsub = readCatalogue(
+      'programs',
       collection(db, 'programs'),
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProgramCourse));

@@ -55,6 +55,7 @@ import {
   deleteDoc,
   query,
   orderBy,
+  limit,
   serverTimestamp
 } from 'firebase/firestore';
 
@@ -719,7 +720,8 @@ export const LearningResourceLibrary: React.FC<LearningResourceLibraryProps> = (
 
     unsubs.push(
       onSnapshot(
-        collection(db, 'resource_submissions'),
+        // V2: newest 500 submissions only; older graded work stays in Firestore but isn't re-read on every visit
+        query(collection(db, 'resource_submissions'), orderBy('submittedAt', 'desc'), limit(500)),
         (snap) => {
           const list: ResourceSubmissionRecord[] = [];
           snap.forEach((docSnap) => {

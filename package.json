@@ -1,29 +1,32 @@
 {
-  "name": "react-example",
+  "name": "lilab",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "start": "node server.ts",
     "build": "vite build",
+    "start": "node scripts/ensure-build.mjs && NODE_ENV=production node server.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "build:preview": "vite build --mode preview --outDir dist-preview",
+    "clean": "rm -rf dist dist-preview server.js",
+    "lint": "tsc --noEmit",
+    "narration:generate": "tsx scripts/generate-speaking-narration.ts",
+    "migrate:sql-to-storage": "tsx scripts/migrate-postgres-to-storage.ts"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^9.1.0",
+    "@google-cloud/storage": "^8.1.0",
     "@google/genai": "^3.6.1",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",
-    "drizzle-orm": "^0.45.4",
     "express": "^4.21.2",
     "firebase": "^13.3.0",
     "firebase-admin": "^14.5.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdfjs-dist": "^6.5.438",
-    "pg": "^8.23.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.11.0",
@@ -37,10 +40,13 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "drizzle-kit": "^0.31.11",
     "esbuild": "^0.28.0",
     "eslint": "^10.15.0",
+    "pg": "^8.23.1",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

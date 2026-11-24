@@ -12,10 +12,10 @@ import {
 } from 'firebase/firestore';
 import { Award, BookOpen, Calendar, Check, CheckCircle2, Languages, Lock, Pencil, Plus, Printer, ShieldCheck, Sparkles, StickyNote, Trash2, TrendingUp, User, Wallet, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { readCatalogue } from '../services/catalogueReads';
 import { biText, formatVnd, TRANSLATIONS } from '../i18n';
 import { assistAssessmentInsight, translateText } from '../services/aiClient';
 import { isSuperAdminEmail } from '../services/seedData';
-import { deleteRecordFromSql, syncRecordToSql } from '../services/sqlSyncClient';
 import { ErrorBoundary } from './ErrorBoundary';
 import { HistoricalProgress } from './HistoricalProgress';
 import { ProfileAvatar } from './ProfileAvatar';
@@ -228,7 +228,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     );
 
     unsubs.push(
-      onSnapshot(
+      readCatalogue(
+        'gemini_notes',
         collection(db, 'gemini_notes'),
         (snap) => {
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as GeminiNote));
@@ -356,7 +357,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('quick_notes', id, payload);
       setQnText('');
       flash(
         biText(
@@ -379,7 +379,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         includeInReport: nextInclude,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('quick_notes', note.id, { ...note, includeInReport: nextInclude });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `quick_notes/${note.id}`);
     }
@@ -405,7 +404,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('quick_notes', note.id, { ...note, ...updates });
       setEditingQuickNoteId(null);
       flash(biText(lang, 'Quick note updated.', 'Đã cập nhật ghi chú nhanh.'));
     } catch (err) {
@@ -418,7 +416,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleDeleteQuickNote = async (note: StudentQuickNote) => {
     try {
       await deleteDoc(doc(db, 'quick_notes', note.id));
-      await deleteRecordFromSql('quick_notes', note.id);
       if (editingQuickNoteId === note.id) setEditingQuickNoteId(null);
       flash(biText(lang, 'Quick note deleted.', 'Đã xóa ghi chú nhanh.'));
     } catch (err) {
@@ -479,19 +476,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           updatedAt: serverTimestamp(),
         });
         const existingAsm = assessments.find((x) => x.id === editingAssessmentId);
-        await syncRecordToSql('assessments', editingAssessmentId, {
-          ...(existingAsm || {}),
-          ...updatePayload,
-        });
         await updateDoc(doc(db, 'students', stu.id), {
           cefrLevel,
           cefrModifier: cefrMod,
           updatedAt: serverTimestamp(),
-        });
-        await syncRecordToSql('students', stu.id, {
-          ...stu,
-          cefrLevel,
-          cefrModifier: cefrMod,
         });
         flash(
           biText(
@@ -536,18 +524,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('assessments', id, newPayload);
 
         // Sync student's current CEFR level +/-
         await updateDoc(doc(db, 'students', stu.id), {
           cefrLevel,
           cefrModifier: cefrMod,
           updatedAt: serverTimestamp(),
-        });
-        await syncRecordToSql('students', stu.id, {
-          ...stu,
-          cefrLevel,
-          cefrModifier: cefrMod,
         });
 
         flash(
@@ -573,7 +555,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setBusy(true);
     try {
       await deleteDoc(doc(db, 'assessments', a.id));
-      await deleteRecordFromSql('assessments', a.id);
       if (editingAssessmentId === a.id) {
         resetFormToCreate();
       }
@@ -597,7 +578,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     try {
       for (const a of assessments) {
         await deleteDoc(doc(db, 'assessments', a.id));
-        await deleteRecordFromSql('assessments', a.id);
       }
       resetFormToCreate();
       setConfirmDeleteAllReports(false);
@@ -633,7 +613,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         ...updates,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('teachers', teacherDoc.id, { ...teacherDoc, ...updates });
       flash(
         biText(
           lang,
@@ -655,7 +634,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
-      await syncRecordToSql('schedules', s.id, { ...s, status: nextStatus });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `schedules/${s.id}`);
     }

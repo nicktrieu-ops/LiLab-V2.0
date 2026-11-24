@@ -26,7 +26,7 @@ import {
   type TeacherTab,
 } from './config/portalNavigation';
 import { isSuperAdminEmail } from './services/seedData';
-import { syncRecordToSql } from './services/sqlSyncClient';
+import { invalidateCatalogue } from './services/catalogueReads';
 import type { LangCode, UserProfile, UserRole } from './types';
 import { AcademyContactSection } from './components/AcademyContactSection';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -97,10 +97,33 @@ export default function App() {
     setPromoOpen(true);
   };
 
+  // V2 cost control: remember the resolved profile for this browser tab session so reloads
+  // don't repeat the profile, admin and student-match lookups (up to 4 reads per visit).
+  const PROFILE_CACHE_PREFIX = 'lilab_profile_v2_';
+  const rememberProfile = (profile: UserProfile) => {
+    setUserProfile(profile);
+    try {
+      sessionStorage.setItem(PROFILE_CACHE_PREFIX + profile.uid, JSON.stringify(profile));
+    } catch {
+      // storage unavailable
+    }
+  };
+
   const syncUserProfile = async (user: User) => {
     if (!user.emailVerified) {
       setUserProfile(null);
       return;
+    }
+    try {
+      const cached = sessionStorage.getItem(PROFILE_CACHE_PREFIX + user.uid);
+      if (cached) {
+        const parsed = JSON.parse(cached) as UserProfile;
+        setUserProfile(parsed);
+        if (parsed.preferredLang) setLang(parsed.preferredLang);
+        return;
+      }
+    } catch {
+      // ignore a corrupt cache entry and load normally
     }
 
     setProfileLoading(true);
@@ -166,9 +189,8 @@ export default function App() {
             // ignore student lookup error
           }
         }
-        setUserProfile(loaded);
+        rememberProfile(loaded);
         if (loaded.preferredLang) setLang(loaded.preferredLang);
-        await syncRecordToSql('users', user.uid, loaded as unknown as Record<string, unknown>);
         return;
       }
 
@@ -194,8 +216,7 @@ export default function App() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        await syncRecordToSql('users', user.uid, newSuperAdmin as unknown as Record<string, unknown>);
-        setUserProfile(newSuperAdmin);
+        rememberProfile(newSuperAdmin);
         return;
       }
 
@@ -277,8 +298,7 @@ export default function App() {
         status: 'active',
         ...(claimedInviteId ? { claimedInviteId } : {}),
       };
-      await syncRecordToSql('users', user.uid, builtProfile as unknown as Record<string, unknown>);
-      setUserProfile(builtProfile);
+      rememberProfile(builtProfile);
     } catch (err) {
       console.error('Profile sync error:', err);
       setProfileError(err instanceof Error ? err.message : 'Unable to load account profile.');
@@ -309,8 +329,7 @@ export default function App() {
           updatedAt: serverTimestamp(),
         });
         const updatedProfile = { ...userProfile, preferredLang: next };
-        setUserProfile(updatedProfile);
-        await syncRecordToSql('users', firebaseUser.uid, updatedProfile as unknown as Record<string, unknown>);
+        rememberProfile(updatedProfile);
       } catch {
         // Non-blocking preference save
       }
@@ -333,6 +352,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (import.meta.env.MODE === 'preview') return; // keep the clickable preview unobstructed
     if (promoAutoShownRef.current || userProfile?.role !== 'parent') return;
     promoAutoShownRef.current = true;
     try {
@@ -467,7 +487,7 @@ export default function App() {
             />
           </span>
 
-          <span className="hidden lg:inline text-sm font-bold text-white whitespace-nowrap">{roleTitle}</span>
+          <span className={`${roleNavTabs.length > 6 ? "hidden 2xl:inline" : "hidden lg:inline"} text-sm font-bold text-white whitespace-nowrap`}>{roleTitle}</span>
 
           <nav
             aria-label={biText(lang, 'Portal sections', 'Các mục trong cổng')}
@@ -494,7 +514,17 @@ export default function App() {
             <LangSwitch value={lang} onChange={handleToggleLang} tone="dark" className="hidden sm:inline-flex" />
             <button
               type="button"
-              onClick={() => signOut(auth)}
+              onClick={() => {
+                try {
+                  Object.keys(sessionStorage)
+                    .filter((k) => k.startsWith(PROFILE_CACHE_PREFIX))
+                    .forEach((k) => sessionStorage.removeItem(k));
+                } catch {
+                  // storage unavailable
+                }
+                invalidateCatalogue();
+                void signOut(auth);
+              }}
               className="px-3 py-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 text-xs font-semibold transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -545,7 +575,10 @@ export default function App() {
                 <span className="text-xs font-semibold text-muted">{biText(lang, 'View as', 'Xem với vai trò')}</span>
                 <SegmentedControl
                   value={adminPreviewRole}
-                  onChange={setAdminPreviewRole}
+                  onChange={(next) => {
+                    invalidateCatalogue(); // admins may have just edited programs or notes
+                    setAdminPreviewRole(next);
+                  }}
                   options={[
                     { id: 'admin', label: biText(lang, 'Admin', 'Quản trị') },
                     { id: 'teacher', label: biText(lang, 'Teacher', 'Giáo viên') },

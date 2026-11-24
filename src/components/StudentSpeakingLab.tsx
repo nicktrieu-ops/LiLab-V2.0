@@ -45,6 +45,7 @@ import {
   type SpeakingLevelId,
   type SpeakingStyleTag,
 } from '../data/speakingLab';
+import { speakingNarrationStyle } from '../data/speakingLab/narrationStyle';
 import type { LangCode, StudentProfile, UserProfile } from '../types';
 
 interface StudentSpeakingLabProps {
@@ -622,12 +623,7 @@ export const StudentSpeakingLab: React.FC<StudentSpeakingLabProps> = ({
 
       setTtsLoading(mode);
       try {
-        const stylePrompt =
-          mode === 'slow'
-            ? 'Clear, slow, deliberate English pronunciation teacher articulating every syllable and final consonant gently for young learners'
-            : activeItem.styleTag === 'cultural' && activeItem.region
-              ? `Warm, friendly, natural English speaker with a clear, authentic ${REGION_LABELS[activeItem.region]?.en || 'international'} cadence`
-              : 'Warm, upbeat, crystal-clear native English teacher speaking naturally for kids and teens';
+        const stylePrompt = speakingNarrationStyle(activeItem, mode);
 
         const res = await synthesizeNaturalVoice({
           text: activeItem.text,
@@ -912,7 +908,8 @@ export const StudentSpeakingLab: React.FC<StudentSpeakingLabProps> = ({
       recorder.start();
       setIsRecording(true);
 
-      const maxSec = activeItem.kind === 'phrase' ? 14 : 7;
+      // V2: Gemini bills audio by length, so recordings stop a little sooner (was 14s / 7s)
+      const maxSec = activeItem.kind === 'phrase' ? 12 : 6;
       const startedAt = Date.now();
       timerRef.current = window.setInterval(() => {
         const elapsed = Math.floor((Date.now() - startedAt) / 1000);

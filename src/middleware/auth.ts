@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { adminAuth } from '../lib/firebase-admin.ts';
-import { getOrCreateUser } from '../db/users.ts';
 
 export const SERVER_SUPER_ADMIN_EMAILS = [
   'nickmyriam@gmail.com',
@@ -18,35 +17,22 @@ export interface AuthRequest extends Request {
   user?: DecodedIdToken;
 }
 
-export const requireAuth = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
+/** Returns the verified Firebase user for a request, or null when there is no valid token. */
+export async function getOptionalUser(req: Request): Promise<DecodedIdToken | null> {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing token' });
-  }
-
-  const token = authHeader.split('Bearer ')[1];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    req.user = decodedToken;
-
-    if (decodedToken.email) {
-      await getOrCreateUser({
-        uid: decodedToken.uid,
-        email: decodedToken.email,
-        displayName: typeof decodedToken.name === 'string' ? decodedToken.name : undefined,
-        role: isServerSuperAdmin(decodedToken.email) ? 'super_admin' : undefined,
-      }).catch((err) => {
-        console.error('Background user sync failed:', err);
-      });
-    }
-
-    next();
-  } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    return await adminAuth.verifyIdToken(authHeader.slice('Bearer '.length));
+  } catch {
+    return null;
   }
+}
+
+export const requireAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const user = await getOptionalUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Sign in again to continue.' });
+  }
+  req.user = user;
+  next();
 };

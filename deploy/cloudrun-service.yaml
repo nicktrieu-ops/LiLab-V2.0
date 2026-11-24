@@ -1,0 +1,30 @@
+# Cloud Run sizing for LiLab V2.0 (API only when the site is served by Firebase Hosting).
+# Apply with:  gcloud run services replace deploy/cloudrun-service.yaml --region asia-southeast1
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: lilab
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"        # no idle instances: pay nothing overnight
+        autoscaling.knative.dev/maxScale: "3"        # caps the worst-case bill if traffic spikes
+        run.googleapis.com/cpu-throttling: "true"    # CPU billed only while a request is running
+        run.googleapis.com/startup-cpu-boost: "true" # faster cold starts at no idle cost
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 120
+      containers:
+        - image: asia-southeast1-docker.pkg.dev/PROJECT_ID/lilab/lilab:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
