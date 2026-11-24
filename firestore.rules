@@ -1,0 +1,1069 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSuperAdmin() {
+      return isVerified() && request.auth.token.email in [
+        'nickmyriam@gmail.com',
+        'nicktrieu@gmail.com',
+        'lilabvietnam@gmail.com'
+      ];
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.level == 'admin'
+      ) || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['super_admin', 'admin']
+      );
+    }
+
+    function isListedAdmin() {
+      return isAdmin() || (
+        isVerified() &&
+        ('adminUids' in existing()) &&
+        existing().adminUids is list &&
+        request.auth.uid in existing().adminUids
+      );
+    }
+
+    function isAdminOrTeacher() {
+      return isAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['super_admin', 'admin', 'teacher']
+      );
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function hasValidTimestampsOnCreate(data) {
+      return data.createdAt == request.time && data.updatedAt == request.time;
+    }
+
+    function hasValidTimestampsOnUpdate(data) {
+      return (!('createdAt' in existing()) || data.createdAt == existing().createdAt || data.createdAt == request.time)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidAdminUids(listVal) {
+      return listVal is list && listVal.size() <= 20 && (listVal.size() == 0 || listVal[0] is string);
+    }
+
+    function isValidCefrLevel(lvl) {
+      return lvl in ['Pre-A1 Starters', 'A1 Movers', 'A2 Flyers', 'A2 Key', 'B1 Preliminary', 'B2 First', 'C1 Advanced', 'C2 Proficiency'];
+    }
+
+    function isValidCefrModifier(mod) {
+      return mod in ['-', 'standard', '+'];
+    }
+
+    function isValidScore(val) {
+      return (val is int || val is float) && val >= 0 && val <= 100;
+    }
+
+    function hasValidPendingInvite(inviteId, expectedRole) {
+      return isValidId(inviteId)
+        && exists(/databases/$(database)/documents/user_invites/$(inviteId))
+        && get(/databases/$(database)/documents/user_invites/$(inviteId)).data.email == request.auth.token.email
+        && get(/databases/$(database)/documents/user_invites/$(inviteId)).data.status == 'pending'
+        && get(/databases/$(database)/documents/user_invites/$(inviteId)).data.role == expectedRole;
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'level', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'level', 'claimedInviteId', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.level in ['super_admin', 'admin']
+        && (!('claimedInviteId' in data) || isValidId(data.claimedInviteId));
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'preferredLang', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'phone', 'photoUrl', 'preferredLang', 'claimedInviteId', 'status', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['super_admin', 'admin', 'teacher', 'parent', 'student']
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 250000))
+        && data.preferredLang in ['en', 'vi', 'bi']
+        && (!('claimedInviteId' in data) || isValidId(data.claimedInviteId))
+        && data.status in ['active', 'inactive'];
+    }
+
+    function isValidUserInvite(data) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'status', 'createdByUid', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'displayName', 'role', 'phone', 'status', 'createdByUid', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['admin', 'teacher', 'parent', 'student']
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
+        && data.status in ['pending', 'claimed']
+        && isValidId(data.createdByUid)
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidTeacherProfile(data) {
+      return data.keys().hasAll(['teacherEmail', 'fullName', 'specialty', 'cefrCertification', 'hourlyRateVnd', 'monthlyBaseVnd', 'payStatus', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['teacherUid', 'teacherEmail', 'fullName', 'phone', 'photoUrl', 'specialty', 'cefrCertification', 'bioEn', 'bioVi', 'hourlyRateVnd', 'monthlyBaseVnd', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'payStatus', 'payNotes', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && (!('teacherUid' in data) || (data.teacherUid is string && data.teacherUid.size() <= 128))
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 160
+        && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 250000))
+        && data.specialty is string && data.specialty.size() <= 160
+        && data.cefrCertification is string && data.cefrCertification.size() <= 80
+        && (!('bioEn' in data) || (data.bioEn is string && data.bioEn.size() <= 1000))
+        && (!('bioVi' in data) || (data.bioVi is string && data.bioVi.size() <= 1000))
+        && (data.hourlyRateVnd is int || data.hourlyRateVnd is float) && data.hourlyRateVnd >= 0 && data.hourlyRateVnd <= 100000000
+        && (data.monthlyBaseVnd is int || data.monthlyBaseVnd is float) && data.monthlyBaseVnd >= 0 && data.monthlyBaseVnd <= 500000000
+        && (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 120))
+        && (!('bankAccountNumber' in data) || (data.bankAccountNumber is string && data.bankAccountNumber.size() <= 60))
+        && (!('bankAccountHolder' in data) || (data.bankAccountHolder is string && data.bankAccountHolder.size() <= 120))
+        && data.payStatus in ['active', 'pending_payout', 'paid']
+        && (!('payNotes' in data) || (data.payNotes is string && data.payNotes.size() <= 500))
+        && data.status in ['active', 'inactive']
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidStudentProfile(data) {
+      return data.keys().hasAll(['fullName', 'parentName', 'parentEmail', 'age', 'gender', 'cefrLevel', 'cefrModifier', 'enrolledClassIds', 'assignedTeacherEmails', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['fullName', 'studentEmail', 'parentName', 'parentEmail', 'parentPhone', 'photoUrl', 'parentUid', 'studentUid', 'age', 'gender', 'cefrLevel', 'cefrModifier', 'enrolledClassIds', 'assignedTeacherEmails', 'activitiesNote', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && data.parentName is string && data.parentName.size() >= 1 && data.parentName.size() <= 120
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() <= 160
+        && (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 40))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 250000))
+        && (!('parentUid' in data) || (data.parentUid is string && data.parentUid.size() <= 128))
+        && (!('studentUid' in data) || (data.studentUid is string && data.studentUid.size() <= 128))
+        && (data.age is int || data.age is float) && data.age >= 2 && data.age <= 99
+        && data.gender in ['girl', 'boy']
+        && isValidCefrLevel(data.cefrLevel)
+        && isValidCefrModifier(data.cefrModifier)
+        && data.enrolledClassIds is list && data.enrolledClassIds.size() <= 12
+        && data.assignedTeacherEmails is list && data.assignedTeacherEmails.size() <= 12
+        && (!('activitiesNote' in data) || (data.activitiesNote is string && data.activitiesNote.size() <= 800))
+        && data.status in ['active', 'paused', 'graduated']
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidProgramCourse(data) {
+      return data.keys().hasAll(['code', 'titleEn', 'titleVi', 'descriptionEn', 'descriptionVi', 'cefrTarget', 'ageRange', 'weeksCount', 'tuitionVnd', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['code', 'titleEn', 'titleVi', 'descriptionEn', 'descriptionVi', 'cefrTarget', 'ageRange', 'weeksCount', 'tuitionVnd', 'scheduleSummary', 'teacherName', 'teacherId', 'enrollmentDate', 'startDate', 'maxClassSize', 'location', 'showInPromoPopup', 'promoBadgeEn', 'promoBadgeVi', 'isActive', 'createdAt', 'updatedAt'])
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 40
+        && data.titleEn is string && data.titleEn.size() >= 1 && data.titleEn.size() <= 160
+        && data.titleVi is string && data.titleVi.size() >= 1 && data.titleVi.size() <= 160
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1200
+        && data.descriptionVi is string && data.descriptionVi.size() <= 1200
+        && data.cefrTarget is string && data.cefrTarget.size() <= 60
+        && data.ageRange is string && data.ageRange.size() <= 40
+        && (data.weeksCount is int || data.weeksCount is float) && data.weeksCount >= 1 && data.weeksCount <= 104
+        && (data.tuitionVnd is int || data.tuitionVnd is float) && data.tuitionVnd >= 0 && data.tuitionVnd <= 500000000
+        && (!('scheduleSummary' in data) || (data.scheduleSummary is string && data.scheduleSummary.size() <= 160))
+        && (!('teacherName' in data) || (data.teacherName is string && data.teacherName.size() <= 120))
+        && (!('teacherId' in data) || (data.teacherId is string && data.teacherId.size() <= 128))
+        && (!('enrollmentDate' in data) || (data.enrollmentDate is string && data.enrollmentDate.size() <= 30))
+        && (!('startDate' in data) || (data.startDate is string && data.startDate.size() <= 30))
+        && (!('maxClassSize' in data) || ((data.maxClassSize is int || data.maxClassSize is float) && data.maxClassSize >= 1 && data.maxClassSize <= 100))
+        && (!('location' in data) || (data.location is string && data.location.size() <= 160))
+        && (!('showInPromoPopup' in data) || data.showInPromoPopup is bool)
+        && (!('promoBadgeEn' in data) || (data.promoBadgeEn is string && data.promoBadgeEn.size() <= 80))
+        && (!('promoBadgeVi' in data) || (data.promoBadgeVi is string && data.promoBadgeVi.size() <= 80))
+        && data.isActive is bool;
+    }
+
+    function isValidAcademyClass(data) {
+      return data.keys().hasAll(['name', 'programId', 'programTitle', 'teacherEmail', 'teacherName', 'cefrLevel', 'cefrModifier', 'room', 'scheduleText', 'maxStudents', 'studentIds', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'programId', 'programTitle', 'teacherUid', 'teacherEmail', 'teacherName', 'cefrLevel', 'cefrModifier', 'room', 'scheduleText', 'maxStudents', 'studentIds', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && isValidId(data.programId)
+        && data.programTitle is string && data.programTitle.size() <= 160
+        && (!('teacherUid' in data) || (data.teacherUid is string && data.teacherUid.size() <= 128))
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 160
+        && data.teacherName is string && data.teacherName.size() <= 120
+        && data.cefrLevel is string && data.cefrLevel.size() <= 60
+        && isValidCefrModifier(data.cefrModifier)
+        && data.room is string && data.room.size() <= 60
+        && data.scheduleText is string && data.scheduleText.size() <= 160
+        && (data.maxStudents is int || data.maxStudents is float) && data.maxStudents >= 1 && data.maxStudents <= 100
+        && data.studentIds is list && data.studentIds.size() <= 30
+        && data.status in ['active', 'upcoming', 'completed']
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidClassSchedule(data) {
+      return data.keys().hasAll(['classId', 'className', 'teacherEmail', 'teacherName', 'dayOfWeek', 'startTime', 'endTime', 'room', 'weekNumber', 'topicEn', 'topicVi', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['classId', 'className', 'teacherUid', 'teacherEmail', 'teacherName', 'dayOfWeek', 'startTime', 'endTime', 'room', 'weekNumber', 'topicEn', 'topicVi', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.classId)
+        && data.className is string && data.className.size() <= 120
+        && (!('teacherUid' in data) || (data.teacherUid is string && data.teacherUid.size() <= 128))
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 160
+        && data.teacherName is string && data.teacherName.size() <= 120
+        && data.dayOfWeek in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        && data.startTime is string && data.startTime.size() <= 20
+        && data.endTime is string && data.endTime.size() <= 20
+        && data.room is string && data.room.size() <= 60
+        && (data.weekNumber is int || data.weekNumber is float) && data.weekNumber >= 1 && data.weekNumber <= 52
+        && data.topicEn is string && data.topicEn.size() <= 200
+        && data.topicVi is string && data.topicVi.size() <= 200
+        && data.status in ['scheduled', 'completed', 'cancelled']
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidStudentAssessment(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'classId', 'className', 'teacherEmail', 'teacherName', 'parentEmail', 'termLabel', 'cefrLevel', 'cefrModifier', 'speakingScore', 'readingScore', 'writingScore', 'socialScore', 'emotionalScore', 'mentalScore', 'teacherCommentEn', 'teacherCommentVi', 'activitiesCompleted', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'classId', 'className', 'teacherUid', 'teacherEmail', 'teacherName', 'parentEmail', 'studentEmail', 'termLabel', 'cefrLevel', 'cefrModifier', 'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore', 'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore', 'teacherCommentEn', 'teacherCommentVi', 'aiInsightEn', 'aiInsightVi', 'activitiesCompleted', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() <= 120
+        && isValidId(data.classId)
+        && data.className is string && data.className.size() <= 120
+        && (!('teacherUid' in data) || (data.teacherUid is string && data.teacherUid.size() <= 128))
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 160
+        && data.teacherName is string && data.teacherName.size() <= 120
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() >= 0 && data.parentEmail.size() <= 160
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && data.termLabel is string && data.termLabel.size() <= 80
+        && isValidCefrLevel(data.cefrLevel)
+        && isValidCefrModifier(data.cefrModifier)
+        && isValidScore(data.speakingScore)
+        && isValidScore(data.readingScore)
+        && isValidScore(data.writingScore)
+        && (!('vocabularyScore' in data) || isValidScore(data.vocabularyScore))
+        && (!('comprehensionScore' in data) || isValidScore(data.comprehensionScore))
+        && isValidScore(data.socialScore)
+        && isValidScore(data.emotionalScore)
+        && isValidScore(data.mentalScore)
+        && data.teacherCommentEn is string && data.teacherCommentEn.size() <= 1500
+        && data.teacherCommentVi is string && data.teacherCommentVi.size() <= 1500
+        && (!('aiInsightEn' in data) || (data.aiInsightEn is string && data.aiInsightEn.size() <= 2000))
+        && (!('aiInsightVi' in data) || (data.aiInsightVi is string && data.aiInsightVi.size() <= 2000))
+        && data.activitiesCompleted is list && data.activitiesCompleted.size() <= 20
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidGeminiNote(data) {
+      return data.keys().hasAll(['title', 'weekNumber', 'programTitle', 'summaryEn', 'summaryVi', 'keyVocabulary', 'uploadedByUid', 'uploadedByEmail', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'weekNumber', 'programTitle', 'sourceFileName', 'summaryEn', 'summaryVi', 'keyVocabulary', 'phonicsFocus', 'grammarFocus', 'activitiesEn', 'activitiesVi', 'uploadedByUid', 'uploadedByEmail', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && (data.weekNumber is int || data.weekNumber is float) && data.weekNumber >= 1 && data.weekNumber <= 52
+        && data.programTitle is string && data.programTitle.size() <= 120
+        && (!('sourceFileName' in data) || (data.sourceFileName is string && data.sourceFileName.size() <= 200))
+        && data.summaryEn is string && data.summaryEn.size() <= 2500
+        && data.summaryVi is string && data.summaryVi.size() <= 2500
+        && data.keyVocabulary is list && data.keyVocabulary.size() <= 40
+        && (!('phonicsFocus' in data) || (data.phonicsFocus is string && data.phonicsFocus.size() <= 500))
+        && (!('grammarFocus' in data) || (data.grammarFocus is string && data.grammarFocus.size() <= 500))
+        && (!('activitiesEn' in data) || (data.activitiesEn is string && data.activitiesEn.size() <= 1500))
+        && (!('activitiesVi' in data) || (data.activitiesVi is string && data.activitiesVi.size() <= 1500))
+        && isValidId(data.uploadedByUid)
+        && data.uploadedByEmail is string && data.uploadedByEmail.size() >= 3 && data.uploadedByEmail.size() <= 160;
+    }
+
+    function isValidTuitionInvoice(data) {
+      return data.keys().hasAll(['invoiceNumber', 'studentId', 'studentName', 'parentEmail', 'programTitle', 'amountVnd', 'dueDate', 'status', 'paymentMethod', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['invoiceNumber', 'studentId', 'studentName', 'parentEmail', 'parentUid', 'parentPhone', 'programId', 'programTitle', 'amountVnd', 'dueDate', 'status', 'paymentMethod', 'paymentReference', 'payerBankName', 'payerAccountHolder', 'paidAt', 'reminderNote', 'reminderChannel', 'lastReminderAt', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() <= 120
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() <= 160
+        && (!('parentUid' in data) || (data.parentUid is string && data.parentUid.size() <= 128))
+        && (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 40))
+        && (!('programId' in data) || (data.programId is string && data.programId.size() <= 128))
+        && data.programTitle is string && data.programTitle.size() <= 160
+        && (data.amountVnd is int || data.amountVnd is float) && data.amountVnd >= 0 && data.amountVnd <= 500000000
+        && data.dueDate is string && data.dueDate.size() <= 30
+        && data.status in ['pending', 'paid', 'overdue', 'reminder_sent']
+        && data.paymentMethod in ['unselected', 'direct_debit', 'credit_card', 'qr_transfer']
+        && (!('paymentReference' in data) || (data.paymentReference is string && data.paymentReference.size() <= 120))
+        && (!('payerBankName' in data) || (data.payerBankName is string && data.payerBankName.size() <= 120))
+        && (!('payerAccountHolder' in data) || (data.payerAccountHolder is string && data.payerAccountHolder.size() <= 120))
+        && (!('paidAt' in data) || (data.paidAt is string && data.paidAt.size() <= 40))
+        && (!('reminderNote' in data) || (data.reminderNote is string && data.reminderNote.size() <= 500))
+        && (!('reminderChannel' in data) || data.reminderChannel in ['email', 'zalo', 'both'])
+        && (!('lastReminderAt' in data) || (data.lastReminderAt is string && data.lastReminderAt.size() <= 40))
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidPayableRecord(data) {
+      return data.keys().hasAll(['recordType', 'recipientName', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'amountVnd', 'dueDate', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['recordType', 'recipientName', 'recipientEmail', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'amountVnd', 'dueDate', 'status', 'notes', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.recordType in ['teacher_payroll', 'vendor_expense', 'academy_bank_config']
+        && data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 120
+        && (!('recipientEmail' in data) || (data.recipientEmail is string && data.recipientEmail.size() <= 160))
+        && data.bankName is string && data.bankName.size() <= 120
+        && data.bankAccountNumber is string && data.bankAccountNumber.size() <= 60
+        && data.bankAccountHolder is string && data.bankAccountHolder.size() <= 120
+        && (data.amountVnd is int || data.amountVnd is float) && data.amountVnd >= 0 && data.amountVnd <= 2000000000
+        && data.dueDate is string && data.dueDate.size() <= 30
+        && data.status in ['scheduled', 'paid', 'pending', 'active']
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 600))
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidEnrollmentRequest(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'parentUid', 'parentEmail', 'programId', 'programTitle', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'parentUid', 'parentEmail', 'programId', 'programTitle', 'preferredSchedule', 'notes', 'status', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() <= 120
+        && isValidId(data.parentUid)
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() <= 160
+        && isValidId(data.programId)
+        && data.programTitle is string && data.programTitle.size() <= 160
+        && (!('preferredSchedule' in data) || (data.preferredSchedule is string && data.preferredSchedule.size() <= 160))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && data.status in ['pending', 'approved', 'enrolled']
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidParentPaymentMethod(data) {
+      return data.keys().hasAll(['parentUid', 'parentEmail', 'methodType', 'providerLabel', 'accountLast4', 'accountHolderName', 'autoPayEnabled', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['parentUid', 'parentEmail', 'parentPhone', 'methodType', 'providerLabel', 'bankName', 'accountLast4', 'accountNumberMasked', 'accountHolderName', 'branchOrNotes', 'autoPayEnabled', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.parentUid)
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() <= 160
+        && (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 40))
+        && data.methodType in ['direct_debit', 'credit_card', 'qr_transfer']
+        && data.providerLabel is string && data.providerLabel.size() >= 1 && data.providerLabel.size() <= 120
+        && (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 120))
+        && data.accountLast4 is string && data.accountLast4.size() <= 16
+        && (!('accountNumberMasked' in data) || (data.accountNumberMasked is string && data.accountNumberMasked.size() <= 40))
+        && data.accountHolderName is string && data.accountHolderName.size() >= 1 && data.accountHolderName.size() <= 120
+        && (!('branchOrNotes' in data) || (data.branchOrNotes is string && data.branchOrNotes.size() <= 240))
+        && data.autoPayEnabled is bool
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidAcademyBankConfig(data) {
+      return data.keys().hasAll(['bankName', 'bankCode', 'accountNumber', 'accountHolder', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['bankName', 'bankCode', 'accountNumber', 'accountHolder', 'branchName', 'zaloHotline', 'paymentInstructionsEn', 'paymentInstructionsVi', 'qrImageDataUrl', 'useDynamicVietQr', 'isActive', 'updatedByEmail', 'createdAt', 'updatedAt'])
+        && data.bankName is string && data.bankName.size() >= 1 && data.bankName.size() <= 120
+        && data.bankCode is string && data.bankCode.size() >= 1 && data.bankCode.size() <= 30
+        && data.accountNumber is string && data.accountNumber.size() >= 1 && data.accountNumber.size() <= 60
+        && data.accountHolder is string && data.accountHolder.size() >= 1 && data.accountHolder.size() <= 120
+        && (!('branchName' in data) || (data.branchName is string && data.branchName.size() <= 120))
+        && (!('zaloHotline' in data) || (data.zaloHotline is string && data.zaloHotline.size() <= 40))
+        && (!('paymentInstructionsEn' in data) || (data.paymentInstructionsEn is string && data.paymentInstructionsEn.size() <= 600))
+        && (!('paymentInstructionsVi' in data) || (data.paymentInstructionsVi is string && data.paymentInstructionsVi.size() <= 600))
+        && (!('qrImageDataUrl' in data) || (data.qrImageDataUrl is string && data.qrImageDataUrl.size() <= 180000))
+        && (!('useDynamicVietQr' in data) || data.useDynamicVietQr is bool)
+        && data.isActive is bool
+        && (!('updatedByEmail' in data) || (data.updatedByEmail is string && data.updatedByEmail.size() <= 160));
+    }
+
+    function isValidPaymentReminderLog(data) {
+      return data.keys().hasAll(['invoiceId', 'invoiceNumber', 'studentId', 'studentName', 'parentEmail', 'programTitle', 'amountVnd', 'channel', 'deliveryMode', 'messagePreview', 'sentByUid', 'sentByEmail', 'sentAt', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['invoiceId', 'invoiceNumber', 'studentId', 'studentName', 'parentEmail', 'parentPhone', 'programTitle', 'amountVnd', 'channel', 'deliveryMode', 'messagePreview', 'sentByUid', 'sentByEmail', 'sentAt', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.invoiceId)
+        && data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && data.parentEmail is string && data.parentEmail.size() >= 3 && data.parentEmail.size() <= 160
+        && (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 40))
+        && data.programTitle is string && data.programTitle.size() >= 1 && data.programTitle.size() <= 160
+        && (data.amountVnd is int || data.amountVnd is float) && data.amountVnd >= 0 && data.amountVnd <= 500000000
+        && data.channel in ['email', 'zalo']
+        && data.deliveryMode is string && data.deliveryMode.size() >= 1 && data.deliveryMode.size() <= 40
+        && data.messagePreview is string && data.messagePreview.size() <= 600
+        && isValidId(data.sentByUid)
+        && data.sentByEmail is string && data.sentByEmail.size() >= 3 && data.sentByEmail.size() <= 160
+        && data.sentAt is string && data.sentAt.size() >= 4 && data.sentAt.size() <= 60
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidQuickNote(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'teacherUid', 'teacherEmail', 'teacherName', 'observationDate', 'category', 'noteText', 'includeInReport', 'adminUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'classId', 'className', 'teacherUid', 'teacherEmail', 'teacherName', 'observationDate', 'category', 'noteText', 'includeInReport', 'adminUids', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && (!('classId' in data) || (data.classId is string && data.classId.size() <= 128))
+        && (!('className' in data) || (data.className is string && data.className.size() <= 120))
+        && isValidId(data.teacherUid)
+        && data.teacherEmail is string && data.teacherEmail.size() >= 3 && data.teacherEmail.size() <= 160
+        && data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 120
+        && data.observationDate is string && data.observationDate.size() >= 4 && data.observationDate.size() <= 30
+        && data.category in ['general', 'speaking', 'reading', 'writing', 'vocabulary', 'comprehension', 'social', 'emotional', 'mental']
+        && data.noteText is string && data.noteText.size() >= 1 && data.noteText.size() <= 1500
+        && data.includeInReport is bool
+        && isValidAdminUids(data.adminUids);
+    }
+
+    function isValidLearningResource(data) {
+      return data.keys().hasAll(['code', 'weekNumber', 'weekThemeEn', 'weekThemeVi', 'cefrLevel', 'category', 'skillFocus', 'estimatedMinutes', 'titleEn', 'titleVi', 'summaryEn', 'summaryVi', 'keyVocabulary', 'phonicsOrGrammar', 'uploadedByUid', 'uploadedByEmail', 'uploadedByName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['code', 'weekNumber', 'weekThemeEn', 'weekThemeVi', 'cefrLevel', 'category', 'skillFocus', 'estimatedMinutes', 'titleEn', 'titleVi', 'summaryEn', 'summaryVi', 'keyVocabulary', 'phonicsOrGrammar', 'readingPassageEn', 'readingPassageVi', 'fileName', 'mimeType', 'fileSizeBytes', 'fileBase64', 'assignedScope', 'assignedClassIds', 'assignedClassNames', 'assignedStudentIds', 'assignedStudentNames', 'materialLinkUrl', 'worksheetPromptsJson', 'uploadedByUid', 'uploadedByEmail', 'uploadedByName', 'createdAt', 'updatedAt'])
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 40
+        && (data.weekNumber is int || data.weekNumber is float) && data.weekNumber >= 1 && data.weekNumber <= 52
+        && data.weekThemeEn is string && data.weekThemeEn.size() >= 1 && data.weekThemeEn.size() <= 160
+        && data.weekThemeVi is string && data.weekThemeVi.size() >= 1 && data.weekThemeVi.size() <= 160
+        && isValidCefrLevel(data.cefrLevel)
+        && data.category in ['pdf_handout', 'practice_worksheet', 'supplemental_reading']
+        && data.skillFocus in ['Speaking', 'Reading', 'Writing', 'Phonics & Vocabulary', 'Listening', 'Be Whole Values']
+        && (data.estimatedMinutes is int || data.estimatedMinutes is float) && data.estimatedMinutes >= 1 && data.estimatedMinutes <= 180
+        && data.titleEn is string && data.titleEn.size() >= 1 && data.titleEn.size() <= 160
+        && data.titleVi is string && data.titleVi.size() >= 1 && data.titleVi.size() <= 160
+        && data.summaryEn is string && data.summaryEn.size() <= 1500
+        && data.summaryVi is string && data.summaryVi.size() <= 1500
+        && data.keyVocabulary is list && data.keyVocabulary.size() <= 30
+        && data.phonicsOrGrammar is string && data.phonicsOrGrammar.size() <= 500
+        && (!('readingPassageEn' in data) || (data.readingPassageEn is string && data.readingPassageEn.size() <= 3000))
+        && (!('readingPassageVi' in data) || (data.readingPassageVi is string && data.readingPassageVi.size() <= 3000))
+        && (!('fileName' in data) || (data.fileName is string && data.fileName.size() <= 200))
+        && (!('mimeType' in data) || (data.mimeType is string && data.mimeType.size() <= 100))
+        && (!('fileSizeBytes' in data) || ((data.fileSizeBytes is int || data.fileSizeBytes is float) && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 20000000))
+        && (!('fileBase64' in data) || (data.fileBase64 is string && data.fileBase64.size() <= 850000))
+        && (!('assignedScope' in data) || (data.assignedScope in ['all', 'class', 'student']))
+        && (!('assignedClassIds' in data) || (data.assignedClassIds is list && data.assignedClassIds.size() <= 30))
+        && (!('assignedClassNames' in data) || (data.assignedClassNames is list && data.assignedClassNames.size() <= 30))
+        && (!('assignedStudentIds' in data) || (data.assignedStudentIds is list && data.assignedStudentIds.size() <= 60))
+        && (!('assignedStudentNames' in data) || (data.assignedStudentNames is list && data.assignedStudentNames.size() <= 60))
+        && (!('materialLinkUrl' in data) || (data.materialLinkUrl is string && data.materialLinkUrl.size() <= 500))
+        && (!('worksheetPromptsJson' in data) || (data.worksheetPromptsJson is string && data.worksheetPromptsJson.size() <= 15000))
+        && isValidId(data.uploadedByUid)
+        && data.uploadedByEmail is string && data.uploadedByEmail.size() >= 3 && data.uploadedByEmail.size() <= 160
+        && data.uploadedByName is string && data.uploadedByName.size() >= 1 && data.uploadedByName.size() <= 120;
+    }
+
+    function isValidResourceSubmission(data) {
+      return data.keys().hasAll(['resourceId', 'resourceCode', 'resourceTitleEn', 'resourceTitleVi', 'weekNumber', 'cefrLevel', 'studentId', 'studentName', 'studentEmail', 'parentEmail', 'classId', 'className', 'teacherEmail', 'teacherName', 'answersJson', 'studentNotes', 'autoScorePercent', 'status', 'submittedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['resourceId', 'resourceCode', 'resourceTitleEn', 'resourceTitleVi', 'weekNumber', 'cefrLevel', 'studentId', 'studentName', 'studentEmail', 'parentEmail', 'classId', 'className', 'teacherEmail', 'teacherName', 'answersJson', 'studentNotes', 'autoScorePercent', 'status', 'gradeScore', 'teacherFeedbackEn', 'teacherFeedbackVi', 'gradedByEmail', 'gradedByName', 'submittedAt', 'gradedAt', 'createdAt', 'updatedAt'])
+        && data.resourceId is string && data.resourceId.size() >= 1 && data.resourceId.size() <= 128
+        && data.resourceCode is string && data.resourceCode.size() <= 40
+        && data.resourceTitleEn is string && data.resourceTitleEn.size() <= 160
+        && data.resourceTitleVi is string && data.resourceTitleVi.size() <= 160
+        && (data.weekNumber is int || data.weekNumber is float)
+        && data.cefrLevel is string && data.cefrLevel.size() <= 60
+        && data.studentId is string && data.studentId.size() <= 128
+        && data.studentName is string && data.studentName.size() <= 120
+        && data.studentEmail is string && data.studentEmail.size() <= 160
+        && data.parentEmail is string && data.parentEmail.size() <= 160
+        && data.classId is string && data.classId.size() <= 128
+        && data.className is string && data.className.size() <= 120
+        && data.teacherEmail is string && data.teacherEmail.size() <= 160
+        && data.teacherName is string && data.teacherName.size() <= 120
+        && data.answersJson is string && data.answersJson.size() <= 15000
+        && data.studentNotes is string && data.studentNotes.size() <= 2000
+        && (data.autoScorePercent is int || data.autoScorePercent is float) && data.autoScorePercent >= 0 && data.autoScorePercent <= 100
+        && data.status in ['submitted', 'graded']
+        && (!('gradeScore' in data) || ((data.gradeScore is int || data.gradeScore is float) && data.gradeScore >= 0 && data.gradeScore <= 100))
+        && (!('teacherFeedbackEn' in data) || (data.teacherFeedbackEn is string && data.teacherFeedbackEn.size() <= 2000))
+        && (!('teacherFeedbackVi' in data) || (data.teacherFeedbackVi is string && data.teacherFeedbackVi.size() <= 2000))
+        && (!('gradedByEmail' in data) || (data.gradedByEmail is string && data.gradedByEmail.size() <= 160))
+        && (!('gradedByName' in data) || (data.gradedByName is string && data.gradedByName.size() <= 120))
+        && data.submittedAt is string && data.submittedAt.size() <= 40
+        && (!('gradedAt' in data) || (data.gradedAt is string && data.gradedAt.size() <= 40));
+    }
+
+    function isValidAcademyEvent(data) {
+      return data.keys().hasAll(['titleEn', 'titleVi', 'eventDate', 'startTime', 'endTime', 'eventType', 'status', 'location', 'descriptionEn', 'descriptionVi', 'createdByUid', 'createdByEmail', 'createdByName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['titleEn', 'titleVi', 'eventDate', 'startTime', 'endTime', 'eventType', 'status', 'location', 'classId', 'className', 'programId', 'programTitle', 'cefrLevel', 'teacherEmail', 'teacherName', 'studentIds', 'studentNames', 'studentEmails', 'parentEmails', 'seriesId', 'descriptionEn', 'descriptionVi', 'previousDate', 'createdByUid', 'createdByEmail', 'createdByName', 'createdAt', 'updatedAt'])
+        && data.titleEn is string && data.titleEn.size() >= 1 && data.titleEn.size() <= 160
+        && data.titleVi is string && data.titleVi.size() >= 1 && data.titleVi.size() <= 160
+        && data.eventDate is string && data.eventDate.size() >= 8 && data.eventDate.size() <= 20
+        && data.startTime is string && data.startTime.size() >= 3 && data.startTime.size() <= 20
+        && data.endTime is string && data.endTime.size() >= 3 && data.endTime.size() <= 20
+        && data.eventType in ['class_session', 'cefr_assessment', 'academy_milestone', 'parent_workshop', 'holiday']
+        && data.status in ['scheduled', 'rescheduled', 'completed', 'cancelled']
+        && data.location is string && data.location.size() <= 120
+        && (!('classId' in data) || (data.classId is string && data.classId.size() <= 128))
+        && (!('className' in data) || (data.className is string && data.className.size() <= 120))
+        && (!('programId' in data) || (data.programId is string && data.programId.size() <= 128))
+        && (!('programTitle' in data) || (data.programTitle is string && data.programTitle.size() <= 160))
+        && (!('cefrLevel' in data) || (data.cefrLevel is string && data.cefrLevel.size() <= 60))
+        && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 160))
+        && (!('teacherName' in data) || (data.teacherName is string && data.teacherName.size() <= 120))
+        && (!('studentIds' in data) || (data.studentIds is list && data.studentIds.size() <= 30 && (data.studentIds.size() == 0 || data.studentIds[0] is string)))
+        && (!('studentNames' in data) || (data.studentNames is list && data.studentNames.size() <= 30 && (data.studentNames.size() == 0 || data.studentNames[0] is string)))
+        && (!('studentEmails' in data) || (data.studentEmails is list && data.studentEmails.size() <= 30 && (data.studentEmails.size() == 0 || data.studentEmails[0] is string)))
+        && (!('parentEmails' in data) || (data.parentEmails is list && data.parentEmails.size() <= 30 && (data.parentEmails.size() == 0 || data.parentEmails[0] is string)))
+        && (!('seriesId' in data) || (data.seriesId is string && data.seriesId.size() <= 128))
+        && data.descriptionEn is string && data.descriptionEn.size() <= 1000
+        && data.descriptionVi is string && data.descriptionVi.size() <= 1000
+        && (!('previousDate' in data) || (data.previousDate is string && data.previousDate.size() <= 20))
+        && isValidId(data.createdByUid)
+        && data.createdByEmail is string && data.createdByEmail.size() >= 3 && data.createdByEmail.size() <= 160
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 120;
+    }
+
+    function isValidIssuedCertificate(data) {
+      return data.keys().hasAll([
+          'studentId', 'studentName', 'studentAge', 'studentGender', 'parentEmail',
+          'serialId', 'cefrLevel', 'cefrModifier', 'cefrDisplay', 'pceLevelNumber',
+          'className', 'termLabel', 'teacherName', 'directorName', 'directorTitleEn',
+          'directorTitleVi', 'awardTitleEn', 'awardTitleVi', 'citationEn', 'citationVi',
+          'issueDate', 'certLang', 'theme', 'showScores', 'showStudentPhoto', 'hasScores',
+          'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore',
+          'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore',
+          'englishAvg', 'wholeChildAvg', 'compositeScore', 'honorTierKey',
+          'issuedByUid', 'issuedByEmail', 'issuedByName', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'studentId', 'studentName', 'studentAge', 'studentGender', 'studentPhotoUrl',
+          'parentEmail', 'parentUid', 'studentEmail', 'assessmentId',
+          'serialId', 'cefrLevel', 'cefrModifier', 'cefrDisplay', 'pceLevelNumber',
+          'className', 'termLabel', 'teacherName', 'directorName', 'directorTitleEn',
+          'directorTitleVi', 'awardTitleEn', 'awardTitleVi', 'citationEn', 'citationVi',
+          'issueDate', 'certLang', 'theme', 'showScores', 'showStudentPhoto', 'hasScores',
+          'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore',
+          'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore',
+          'englishAvg', 'wholeChildAvg', 'compositeScore', 'honorTierKey',
+          'issuedByUid', 'issuedByEmail', 'issuedByName', 'adminUids', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && (data.studentAge is int || data.studentAge is float) && data.studentAge >= 2 && data.studentAge <= 25
+        && data.studentGender in ['girl', 'boy']
+        && (!('studentPhotoUrl' in data) || (data.studentPhotoUrl is string && data.studentPhotoUrl.size() <= 250000))
+        && data.parentEmail is string && data.parentEmail.size() <= 160
+        && (!('parentUid' in data) || (data.parentUid is string && data.parentUid.size() <= 128))
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && (!('assessmentId' in data) || (data.assessmentId is string && data.assessmentId.size() <= 128))
+        && data.serialId is string && data.serialId.size() >= 4 && data.serialId.size() <= 60
+        && isValidCefrLevel(data.cefrLevel)
+        && isValidCefrModifier(data.cefrModifier)
+        && data.cefrDisplay is string && data.cefrDisplay.size() >= 1 && data.cefrDisplay.size() <= 80
+        && (data.pceLevelNumber is int || data.pceLevelNumber is float) && data.pceLevelNumber >= 1 && data.pceLevelNumber <= 13
+        && data.className is string && data.className.size() >= 1 && data.className.size() <= 120
+        && data.termLabel is string && data.termLabel.size() >= 1 && data.termLabel.size() <= 120
+        && data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 120
+        && data.directorName is string && data.directorName.size() >= 1 && data.directorName.size() <= 120
+        && data.directorTitleEn is string && data.directorTitleEn.size() >= 1 && data.directorTitleEn.size() <= 120
+        && data.directorTitleVi is string && data.directorTitleVi.size() >= 1 && data.directorTitleVi.size() <= 120
+        && data.awardTitleEn is string && data.awardTitleEn.size() >= 1 && data.awardTitleEn.size() <= 160
+        && data.awardTitleVi is string && data.awardTitleVi.size() >= 1 && data.awardTitleVi.size() <= 160
+        && data.citationEn is string && data.citationEn.size() >= 1 && data.citationEn.size() <= 1000
+        && data.citationVi is string && data.citationVi.size() >= 1 && data.citationVi.size() <= 1000
+        && data.issueDate is string && data.issueDate.size() >= 8 && data.issueDate.size() <= 20
+        && data.certLang in ['en', 'vi', 'bi']
+        && data.theme in ['royal_gold', 'rose_celebration', 'heritage_teal']
+        && data.showScores is bool
+        && data.showStudentPhoto is bool
+        && data.hasScores is bool
+        && isValidScore(data.speakingScore)
+        && isValidScore(data.readingScore)
+        && isValidScore(data.writingScore)
+        && isValidScore(data.vocabularyScore)
+        && isValidScore(data.comprehensionScore)
+        && isValidScore(data.socialScore)
+        && isValidScore(data.emotionalScore)
+        && isValidScore(data.mentalScore)
+        && isValidScore(data.englishAvg)
+        && isValidScore(data.wholeChildAvg)
+        && isValidScore(data.compositeScore)
+        && data.honorTierKey in ['distinction', 'merit', 'commended', 'growth']
+        && isValidId(data.issuedByUid)
+        && data.issuedByEmail is string && data.issuedByEmail.size() >= 3 && data.issuedByEmail.size() <= 160
+        && data.issuedByName is string && data.issuedByName.size() >= 1 && data.issuedByName.size() <= 120
+        && (!('adminUids' in data) || isValidAdminUids(data.adminUids));
+    }
+
+    function isValidStudentMindMap(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'ownerUid', 'title', 'topicTag', 'cefrLevel', 'nodesJson', 'nodeCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'ownerUid', 'studentEmail', 'parentEmail', 'title', 'topicTag', 'cefrLevel', 'nodesJson', 'nodeCount', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && isValidId(data.ownerUid)
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 160))
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.topicTag is string && data.topicTag.size() <= 80
+        && data.cefrLevel is string && data.cefrLevel.size() <= 60
+        && data.nodesJson is string && data.nodesJson.size() >= 2 && data.nodesJson.size() <= 50000
+        && (data.nodeCount is int || data.nodeCount is float) && data.nodeCount >= 1 && data.nodeCount <= 200;
+    }
+
+    function isValidStudentStudyNote(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'ownerUid', 'title', 'subjectTag', 'cefrLevel', 'blocksJson', 'vocabJson', 'excerpt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'ownerUid', 'studentEmail', 'parentEmail', 'title', 'subjectTag', 'cefrLevel', 'blocksJson', 'vocabJson', 'excerpt', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && isValidId(data.ownerUid)
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 160))
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.subjectTag is string && data.subjectTag.size() <= 80
+        && data.cefrLevel is string && data.cefrLevel.size() <= 60
+        && data.blocksJson is string && data.blocksJson.size() >= 2 && data.blocksJson.size() <= 50000
+        && data.vocabJson is string && data.vocabJson.size() >= 2 && data.vocabJson.size() <= 15000
+        && data.excerpt is string && data.excerpt.size() <= 300;
+    }
+
+    function isValidStudentCodeProgress(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'ownerUid', 'xpPoints', 'completedChallengeIds', 'earnedBadgeIds', 'currentStreak', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['studentId', 'studentName', 'ownerUid', 'studentEmail', 'parentEmail', 'xpPoints', 'completedChallengeIds', 'earnedBadgeIds', 'currentStreak', 'lastCompletedAt', 'createdAt', 'updatedAt'])
+        && isValidId(data.studentId)
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && isValidId(data.ownerUid)
+        && (!('studentEmail' in data) || (data.studentEmail is string && data.studentEmail.size() <= 160))
+        && (!('parentEmail' in data) || (data.parentEmail is string && data.parentEmail.size() <= 160))
+        && (data.xpPoints is int || data.xpPoints is float) && data.xpPoints >= 0 && data.xpPoints <= 100000
+        && data.completedChallengeIds is list && data.completedChallengeIds.size() <= 50 && (data.completedChallengeIds.size() == 0 || data.completedChallengeIds[0] is string)
+        && data.earnedBadgeIds is list && data.earnedBadgeIds.size() <= 30 && (data.earnedBadgeIds.size() == 0 || data.earnedBadgeIds[0] is string)
+        && (data.currentStreak is int || data.currentStreak is float) && data.currentStreak >= 0 && data.currentStreak <= 365
+        && (!('lastCompletedAt' in data) || (data.lastCompletedAt is string && data.lastCompletedAt.size() <= 40));
+    }
+
+    // 4. Collection Rules
+
+    // /admins/{uid}
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isValidAdminRecord(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        (isSuperAdmin() && incoming().uid == uid) ||
+        (isVerified() && request.auth.uid == uid && incoming().uid == uid && incoming().email == request.auth.token.email && incoming().level == 'super_admin' && isSuperAdmin()) ||
+        (isVerified() && request.auth.uid == uid && incoming().uid == uid && incoming().email == request.auth.token.email && incoming().level == 'admin' && ('claimedInviteId' in incoming()) && hasValidPendingInvite(incoming().claimedInviteId, 'admin'))
+      );
+      allow update: if isValidId(uid) && isAdmin() && isValidAdminRecord(incoming()) && hasValidTimestampsOnUpdate(incoming()) && incoming().uid == existing().uid;
+      allow delete: if isValidId(uid) && isSuperAdmin() && !(existing().email in ['nickmyriam@gmail.com', 'nicktrieu@gmail.com', 'lilabvietnam@gmail.com']);
+    }
+
+    // /users/{uid} — Strict PII Isolation
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(uid) && isValidUserProfile(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        (isAdmin() && incoming().uid == uid) ||
+        (
+          isVerified() && request.auth.uid == uid && incoming().uid == uid && incoming().email == request.auth.token.email && (
+            (isSuperAdmin() && incoming().role == 'super_admin') ||
+            (incoming().role in ['parent', 'student']) ||
+            (('claimedInviteId' in incoming()) && incoming().role in ['admin', 'teacher', 'parent', 'student'] && hasValidPendingInvite(incoming().claimedInviteId, incoming().role))
+          )
+        )
+      );
+      allow update: if isValidId(uid) && isValidUserProfile(incoming()) && hasValidTimestampsOnUpdate(incoming()) && incoming().uid == existing().uid && (
+        (isSuperAdmin()) ||
+        (isAdmin() && existing().role != 'super_admin' && incoming().role != 'super_admin') ||
+        (isOwner(uid) && isVerified() && incoming().role == existing().role && incoming().email == existing().email && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'photoUrl', 'preferredLang', 'updatedAt']))
+      );
+      allow delete: if isValidId(uid) && (isSuperAdmin() || (isAdmin() && existing().role != 'super_admin'));
+    }
+
+    // /user_invites/{inviteId}
+    match /user_invites/{inviteId} {
+      allow get: if isValidId(inviteId) && (isAdmin() || (isVerified() && existing().email == request.auth.token.email));
+      allow list: if isListedAdmin() || (isVerified() && existing().email == request.auth.token.email);
+      allow create: if isValidId(inviteId) && isAdmin() && isValidUserInvite(incoming()) && hasValidTimestampsOnCreate(incoming()) && incoming().createdByUid == request.auth.uid;
+      allow update: if isValidId(inviteId) && isValidUserInvite(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().email == request.auth.token.email && existing().status == 'pending' && incoming().status == 'claimed' && incoming().role == existing().role && incoming().email == existing().email && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
+      allow delete: if isValidId(inviteId) && isAdmin();
+    }
+
+    // /teachers/{teacherId}
+    match /teachers/{teacherId} {
+      allow get: if isValidId(teacherId) && (isAdmin() || (isVerified() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid)));
+      allow list: if isListedAdmin() || (isVerified() && (existing().teacherEmail == request.auth.token.email || existing().teacherUid == request.auth.uid));
+      allow create: if isValidId(teacherId) && isAdmin() && isValidTeacherProfile(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(teacherId) && isValidTeacherProfile(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().hourlyRateVnd == existing().hourlyRateVnd && incoming().monthlyBaseVnd == existing().monthlyBaseVnd && incoming().payStatus == existing().payStatus && incoming().diff(existing()).affectedKeys().hasOnly(['teacherUid', 'fullName', 'phone', 'photoUrl', 'specialty', 'cefrCertification', 'bioEn', 'bioVi', 'bankName', 'bankAccountNumber', 'bankAccountHolder', 'updatedAt']))
+      );
+      allow delete: if isValidId(teacherId) && isAdmin();
+    }
+
+    // /students/{studentId}
+    match /students/{studentId} {
+      allow get: if isValidId(studentId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().parentEmail == request.auth.token.email ||
+          existing().parentUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (request.auth.token.email in existing().assignedTeacherEmails)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().parentEmail == request.auth.token.email ||
+          existing().parentUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (request.auth.token.email in existing().assignedTeacherEmails)
+        )
+      );
+      allow create: if isValidId(studentId) && isValidStudentProfile(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && incoming().parentEmail == request.auth.token.email && incoming().parentUid == request.auth.uid)
+      );
+      allow update: if isValidId(studentId) && isValidStudentProfile(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && (request.auth.token.email in existing().assignedTeacherEmails) && incoming().diff(existing()).affectedKeys().hasOnly(['cefrLevel', 'cefrModifier', 'activitiesNote', 'photoUrl', 'updatedAt'])) ||
+        (isVerified() && (existing().parentEmail == request.auth.token.email || existing().parentUid == request.auth.uid) && incoming().diff(existing()).affectedKeys().hasOnly(['parentUid', 'parentName', 'parentPhone', 'photoUrl', 'activitiesNote', 'updatedAt']))
+      );
+      allow delete: if isValidId(studentId) && isAdmin();
+    }
+
+    // /programs/{programId} (Public non-PII course catalog for Promo Popup & Parent Enrollment)
+    match /programs/{programId} {
+      allow get: if isValidId(programId);
+      allow list: if true;
+      allow create: if isValidId(programId) && isAdmin() && isValidProgramCourse(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(programId) && isAdmin() && isValidProgramCourse(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(programId) && isAdmin();
+    }
+
+    // /classes/{classId}
+    match /classes/{classId} {
+      allow get: if isValidId(classId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(classId) && isAdmin() && isValidAcademyClass(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(classId) && isAdmin() && isValidAcademyClass(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(classId) && isAdmin();
+    }
+
+    // /schedules/{scheduleId}
+    match /schedules/{scheduleId} {
+      allow get: if isValidId(scheduleId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(scheduleId) && isAdmin() && isValidClassSchedule(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(scheduleId) && isValidClassSchedule(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'topicEn', 'topicVi', 'updatedAt']))
+      );
+      allow delete: if isValidId(scheduleId) && isAdmin();
+    }
+
+    // /assessments/{assessmentId}
+    match /assessments/{assessmentId} {
+      allow get: if isValidId(assessmentId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().teacherEmail == request.auth.token.email ||
+          existing().parentEmail == request.auth.token.email ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().teacherEmail == request.auth.token.email ||
+          existing().parentEmail == request.auth.token.email ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
+        )
+      );
+      allow create: if isValidId(assessmentId) && isValidStudentAssessment(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && incoming().teacherEmail == request.auth.token.email && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+      );
+      allow update: if isValidId(assessmentId) && isValidStudentAssessment(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['termLabel', 'cefrLevel', 'cefrModifier', 'speakingScore', 'readingScore', 'writingScore', 'vocabularyScore', 'comprehensionScore', 'socialScore', 'emotionalScore', 'mentalScore', 'teacherCommentEn', 'teacherCommentVi', 'aiInsightEn', 'aiInsightVi', 'activitiesCompleted', 'updatedAt']))
+      );
+      allow delete: if isValidId(assessmentId) && (
+        isAdmin() ||
+        (isVerified() && existing().teacherEmail == request.auth.token.email)
+      );
+    }
+
+    // /gemini_notes/{noteId}
+    match /gemini_notes/{noteId} {
+      allow get: if isValidId(noteId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(noteId) && isAdmin() && isValidGeminiNote(incoming()) && hasValidTimestampsOnCreate(incoming()) && incoming().uploadedByUid == request.auth.uid;
+      allow update: if isValidId(noteId) && isAdmin() && isValidGeminiNote(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(noteId) && isAdmin();
+    }
+
+    // /invoices/{invoiceId}
+    match /invoices/{invoiceId} {
+      allow get: if isValidId(invoiceId) && (isAdmin() || (isVerified() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid))));
+      allow list: if isListedAdmin() || (isVerified() && (existing().parentEmail == request.auth.token.email || (('parentUid' in existing()) && existing().parentUid == request.auth.uid)));
+      allow create: if isValidId(invoiceId) && isValidTuitionInvoice(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified()
+          && incoming().parentEmail == request.auth.token.email
+          && ('parentUid' in incoming()) && incoming().parentUid == request.auth.uid
+          && exists(/databases/$(database)/documents/students/$(incoming().studentId))
+          && (
+            incoming().status == 'pending' ||
+            (incoming().status == 'paid'
+              && incoming().paymentMethod in ['direct_debit', 'credit_card', 'qr_transfer']
+              && ('paymentReference' in incoming()) && incoming().paymentReference is string && incoming().paymentReference.size() >= 4
+            )
+          )
+        )
+      );
+      allow update: if isValidId(invoiceId) && isValidTuitionInvoice(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified()
+          && existing().parentEmail == request.auth.token.email
+          && existing().status != 'paid'
+          && incoming().amountVnd == existing().amountVnd
+          && incoming().invoiceNumber == existing().invoiceNumber
+          && incoming().parentUid == request.auth.uid
+          && incoming().paymentMethod in ['direct_debit', 'credit_card', 'qr_transfer']
+          && ('paymentReference' in incoming()) && incoming().paymentReference is string && incoming().paymentReference.size() >= 4
+          && incoming().diff(existing()).affectedKeys().hasOnly(['paymentMethod', 'paymentReference', 'payerBankName', 'payerAccountHolder', 'parentPhone', 'paidAt', 'status', 'parentUid', 'updatedAt'])
+        )
+      );
+      allow delete: if isValidId(invoiceId) && isAdmin();
+    }
+
+    // /payables/{payableId} — Admin Only (Banking & Accounts Payable)
+    match /payables/{payableId} {
+      allow get: if isValidId(payableId) && isAdmin();
+      allow list: if isListedAdmin();
+      allow create: if isValidId(payableId) && isAdmin() && isValidPayableRecord(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(payableId) && isAdmin() && isValidPayableRecord(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(payableId) && isAdmin();
+    }
+
+    // /academy_banking/{configId} — LiLab Official Bank & QR Code (Signed-in read, Admin write)
+    match /academy_banking/{configId} {
+      allow get: if isValidId(configId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(configId) && isAdmin() && isValidAcademyBankConfig(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(configId) && isAdmin() && isValidAcademyBankConfig(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(configId) && isAdmin();
+    }
+
+    // /reminder_logs/{logId} — Historical Automated Email & Zalo Payment Reminder Logs (Admin only)
+    match /reminder_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isListedAdmin();
+      allow create: if isValidId(logId) && isAdmin() && isValidPaymentReminderLog(incoming()) && hasValidTimestampsOnCreate(incoming()) && incoming().sentByUid == request.auth.uid;
+      allow update: if isValidId(logId) && isAdmin() && isValidPaymentReminderLog(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    // /enrollments/{enrollmentId}
+    match /enrollments/{enrollmentId} {
+      allow get: if isValidId(enrollmentId) && (isAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
+      allow list: if isListedAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
+      allow create: if isValidId(enrollmentId) && isValidEnrollmentRequest(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email && incoming().status in ['pending', 'enrolled'] && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+      );
+      allow update: if isValidId(enrollmentId) && isAdmin() && isValidEnrollmentRequest(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(enrollmentId) && isAdmin();
+    }
+
+    // /payment_methods/{methodId}
+    match /payment_methods/{methodId} {
+      allow get: if isValidId(methodId) && (isAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email)));
+      allow list: if isListedAdmin() || (isVerified() && (existing().parentUid == request.auth.uid || existing().parentEmail == request.auth.token.email));
+      allow create: if isValidId(methodId) && isValidParentPaymentMethod(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && incoming().parentUid == request.auth.uid && incoming().parentEmail == request.auth.token.email)
+      );
+      allow update: if isValidId(methodId) && isValidParentPaymentMethod(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().parentUid == request.auth.uid && incoming().parentUid == existing().parentUid && incoming().parentEmail == existing().parentEmail && incoming().diff(existing()).affectedKeys().hasOnly(['methodType', 'providerLabel', 'bankName', 'accountLast4', 'accountNumberMasked', 'accountHolderName', 'parentPhone', 'branchOrNotes', 'autoPayEnabled', 'updatedAt']))
+      );
+      allow delete: if isValidId(methodId) && (isAdmin() || (isVerified() && existing().parentUid == request.auth.uid));
+    }
+
+    // /quick_notes/{noteId} — Teacher Daily Student Observations
+    match /quick_notes/{noteId} {
+      allow get: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email));
+      allow list: if isListedAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email);
+      allow create: if isValidId(noteId) && isValidQuickNote(incoming()) && hasValidTimestampsOnCreate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && incoming().teacherEmail == request.auth.token.email && incoming().teacherUid == request.auth.uid && exists(/databases/$(database)/documents/students/$(incoming().studentId)))
+      );
+      allow update: if isValidId(noteId) && isValidQuickNote(incoming()) && hasValidTimestampsOnUpdate(incoming()) && (
+        isAdmin() ||
+        (isVerified() && existing().teacherEmail == request.auth.token.email && incoming().studentId == existing().studentId && incoming().teacherUid == existing().teacherUid && incoming().teacherEmail == existing().teacherEmail && incoming().diff(existing()).affectedKeys().hasOnly(['noteText', 'category', 'observationDate', 'includeInReport', 'updatedAt']))
+      );
+      allow delete: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().teacherEmail == request.auth.token.email));
+    }
+
+    // /learning_resources/{resourceId} — Uploaded PDF Handouts, Worksheets & Reading Materials
+    match /learning_resources/{resourceId} {
+      allow get: if isValidId(resourceId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(resourceId) && isAdminOrTeacher() && isValidLearningResource(incoming()) && hasValidTimestampsOnCreate(incoming()) && incoming().uploadedByUid == request.auth.uid;
+      allow update: if isValidId(resourceId) && isAdminOrTeacher() && isValidLearningResource(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(resourceId) && isAdminOrTeacher();
+    }
+
+    // /resource_submissions/{submissionId} — Student Exercise Submissions & Teacher Grading
+    match /resource_submissions/{submissionId} {
+      allow get: if isValidId(submissionId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(submissionId) && isSignedIn() && isValidResourceSubmission(incoming()) && hasValidTimestampsOnCreate(incoming());
+      allow update: if isValidId(submissionId) && isSignedIn() && isValidResourceSubmission(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(submissionId) && isAdminOrTeacher();
+    }
+
+    // /academy_events/{eventId} — Academy Event Calendar (Classes, CEFR Assessments, Milestones)
+    match /academy_events/{eventId} {
+      allow get: if isValidId(eventId) && isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isValidId(eventId) && isAdminOrTeacher() && isValidAcademyEvent(incoming()) && hasValidTimestampsOnCreate(incoming()) && incoming().createdByUid == request.auth.uid;
+      allow update: if isValidId(eventId) && isAdminOrTeacher() && isValidAcademyEvent(incoming()) && hasValidTimestampsOnUpdate(incoming());
+      allow delete: if isValidId(eventId) && isAdminOrTeacher();
+    }
+
+    // /issued_certificates/{certificateId} — Official Certificates (Admin-Only Issue/Edit/Delete; Read-Only for Parent & Student)
+    match /issued_certificates/{certificateId} {
+      allow get: if isValidId(certificateId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().parentEmail == request.auth.token.email ||
+          (('parentUid' in existing()) && existing().parentUid == request.auth.uid) ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().parentEmail == request.auth.token.email ||
+          (('parentUid' in existing()) && existing().parentUid == request.auth.uid) ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email)
+        )
+      );
+      allow create: if isValidId(certificateId)
+        && isValidIssuedCertificate(incoming())
+        && hasValidTimestampsOnCreate(incoming())
+        && isAdmin()
+        && incoming().issuedByUid == request.auth.uid
+        && exists(/databases/$(database)/documents/students/$(incoming().studentId));
+      allow update: if isValidId(certificateId)
+        && isValidIssuedCertificate(incoming())
+        && hasValidTimestampsOnUpdate(incoming())
+        && isAdmin()
+        && incoming().studentId == existing().studentId
+        && incoming().issuedByUid == existing().issuedByUid;
+      allow delete: if isValidId(certificateId) && isAdmin();
+    }
+
+    // /student_mind_maps/{mapId} — Student Interactive Mind Map Studio
+    match /student_mind_maps/{mapId} {
+      allow get: if isValidId(mapId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        )
+      );
+      allow create: if isValidId(mapId)
+        && isValidStudentMindMap(incoming())
+        && hasValidTimestampsOnCreate(incoming())
+        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+      allow update: if isValidId(mapId)
+        && isValidStudentMindMap(incoming())
+        && hasValidTimestampsOnUpdate(incoming())
+        && (
+          isAdmin() ||
+          (isVerified()
+            && existing().ownerUid == request.auth.uid
+            && incoming().ownerUid == existing().ownerUid
+            && incoming().studentId == existing().studentId
+          )
+        );
+      allow delete: if isValidId(mapId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+    }
+
+    // /student_study_notes/{noteId} — Student Lesson Study Notes
+    match /student_study_notes/{noteId} {
+      allow get: if isValidId(noteId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        )
+      );
+      allow create: if isValidId(noteId)
+        && isValidStudentStudyNote(incoming())
+        && hasValidTimestampsOnCreate(incoming())
+        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+      allow update: if isValidId(noteId)
+        && isValidStudentStudyNote(incoming())
+        && hasValidTimestampsOnUpdate(incoming())
+        && (
+          isAdmin() ||
+          (isVerified()
+            && existing().ownerUid == request.auth.uid
+            && incoming().ownerUid == existing().ownerUid
+            && incoming().studentId == existing().studentId
+          )
+        );
+      allow delete: if isValidId(noteId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+    }
+
+    // /student_code_progress/{progressId} — Student Vibe Coding Lab XP & Digital Badges
+    match /student_code_progress/{progressId} {
+      allow get: if isValidId(progressId) && (
+        isAdmin() ||
+        (isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        ))
+      );
+      allow list: if isListedAdmin() || (
+        isVerified() && (
+          existing().ownerUid == request.auth.uid ||
+          (('studentEmail' in existing()) && existing().studentEmail == request.auth.token.email) ||
+          (('parentEmail' in existing()) && existing().parentEmail == request.auth.token.email)
+        )
+      );
+      allow create: if isValidId(progressId)
+        && isValidStudentCodeProgress(incoming())
+        && hasValidTimestampsOnCreate(incoming())
+        && (isAdmin() || (isVerified() && incoming().ownerUid == request.auth.uid));
+      allow update: if isValidId(progressId)
+        && isValidStudentCodeProgress(incoming())
+        && hasValidTimestampsOnUpdate(incoming())
+        && (
+          isAdmin() ||
+          (isVerified()
+            && existing().ownerUid == request.auth.uid
+            && incoming().ownerUid == existing().ownerUid
+            && incoming().studentId == existing().studentId
+          )
+        );
+      allow delete: if isValidId(progressId) && (isAdmin() || (isVerified() && existing().ownerUid == request.auth.uid));
+    }
+  }
+}

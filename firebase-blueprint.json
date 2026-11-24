@@ -1,0 +1,735 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted registry mapping admin and super_admin UIDs.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "level": { "type": "string", "enum": ["super_admin", "admin"] },
+        "claimedInviteId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "level", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user account and RBAC profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "teacher", "parent", "student"] },
+        "phone": { "type": "string", "maxLength": 40 },
+        "photoUrl": { "type": "string", "maxLength": 120000 },
+        "preferredLang": { "type": "string", "enum": ["en", "vi", "bi"] },
+        "claimedInviteId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "preferredLang", "status", "createdAt", "updatedAt"]
+    },
+    "UserInvite": {
+      "title": "UserInvite",
+      "description": "Admin-provisioned user invitation waiting to be claimed upon sign-in.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "teacher", "parent", "student"] },
+        "phone": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["pending", "claimed"] },
+        "createdByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "status", "createdByUid", "adminUids", "createdAt", "updatedAt"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Teacher academic credentials, class assignments, and compensation/banking info.",
+      "type": "object",
+      "properties": {
+        "teacherUid": { "type": "string", "maxLength": 128 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "photoUrl": { "type": "string", "maxLength": 120000 },
+        "specialty": { "type": "string", "maxLength": 160 },
+        "cefrCertification": { "type": "string", "maxLength": 80 },
+        "bioEn": { "type": "string", "maxLength": 1000 },
+        "bioVi": { "type": "string", "maxLength": 1000 },
+        "hourlyRateVnd": { "type": "number" },
+        "monthlyBaseVnd": { "type": "number" },
+        "bankName": { "type": "string", "maxLength": 120 },
+        "bankAccountNumber": { "type": "string", "maxLength": 60 },
+        "bankAccountHolder": { "type": "string", "maxLength": 120 },
+        "payStatus": { "type": "string", "enum": ["active", "pending_payout", "paid"] },
+        "payNotes": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherEmail", "fullName", "specialty", "cefrCertification", "hourlyRateVnd", "monthlyBaseVnd", "payStatus", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Student record with parent link, Cambridge CEFR level +/-, and assigned teachers.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 120 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "parentName": { "type": "string", "maxLength": 120 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "parentPhone": { "type": "string", "maxLength": 40 },
+        "photoUrl": { "type": "string", "maxLength": 120000 },
+        "parentUid": { "type": "string", "maxLength": 128 },
+        "studentUid": { "type": "string", "maxLength": 128 },
+        "age": { "type": "number" },
+        "gender": { "type": "string", "enum": ["girl", "boy"] },
+        "cefrLevel": { "type": "string", "enum": ["Pre-A1 Starters", "A1 Movers", "A2 Flyers", "A2 Key", "B1 Preliminary", "B2 First", "C1 Advanced", "C2 Proficiency"] },
+        "cefrModifier": { "type": "string", "enum": ["-", "standard", "+"] },
+        "enrolledClassIds": { "type": "array", "maxLength": 12 },
+        "assignedTeacherEmails": { "type": "array", "maxLength": 12 },
+        "activitiesNote": { "type": "string", "maxLength": 800 },
+        "status": { "type": "string", "enum": ["active", "paused", "graduated"] },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "parentName", "parentEmail", "age", "gender", "cefrLevel", "cefrModifier", "enrolledClassIds", "assignedTeacherEmails", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "ProgramCourse": {
+      "title": "ProgramCourse",
+      "description": "Academy curriculum program available for enrollment and promo announcements.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 40 },
+        "titleEn": { "type": "string", "maxLength": 160 },
+        "titleVi": { "type": "string", "maxLength": 160 },
+        "descriptionEn": { "type": "string", "maxLength": 1200 },
+        "descriptionVi": { "type": "string", "maxLength": 1200 },
+        "cefrTarget": { "type": "string", "maxLength": 60 },
+        "ageRange": { "type": "string", "maxLength": 40 },
+        "weeksCount": { "type": "number" },
+        "tuitionVnd": { "type": "number" },
+        "scheduleSummary": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "enrollmentDate": { "type": "string", "maxLength": 30 },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "maxClassSize": { "type": "number" },
+        "location": { "type": "string", "maxLength": 160 },
+        "showInPromoPopup": { "type": "boolean" },
+        "promoBadgeEn": { "type": "string", "maxLength": 80 },
+        "promoBadgeVi": { "type": "string", "maxLength": 80 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "titleEn", "titleVi", "descriptionEn", "descriptionVi", "cefrTarget", "ageRange", "weeksCount", "tuitionVnd", "isActive", "createdAt", "updatedAt"]
+    },
+    "AcademyClass": {
+      "title": "AcademyClass",
+      "description": "Scheduled class cohort linking program, teacher, and students.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 120 },
+        "programId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "programTitle": { "type": "string", "maxLength": 160 },
+        "teacherUid": { "type": "string", "maxLength": 128 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "cefrLevel": { "type": "string", "maxLength": 60 },
+        "cefrModifier": { "type": "string", "enum": ["-", "standard", "+"] },
+        "room": { "type": "string", "maxLength": 60 },
+        "scheduleText": { "type": "string", "maxLength": 160 },
+        "maxStudents": { "type": "number" },
+        "studentIds": { "type": "array", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["active", "upcoming", "completed"] },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "programId", "programTitle", "teacherEmail", "teacherName", "cefrLevel", "cefrModifier", "room", "scheduleText", "maxStudents", "studentIds", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "ClassSchedule": {
+      "title": "ClassSchedule",
+      "description": "Weekly timetable session for teachers and students.",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "className": { "type": "string", "maxLength": 120 },
+        "teacherUid": { "type": "string", "maxLength": 128 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "dayOfWeek": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
+        "startTime": { "type": "string", "maxLength": 20 },
+        "endTime": { "type": "string", "maxLength": 20 },
+        "room": { "type": "string", "maxLength": 60 },
+        "weekNumber": { "type": "number" },
+        "topicEn": { "type": "string", "maxLength": 200 },
+        "topicVi": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["scheduled", "completed", "cancelled"] },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["classId", "className", "teacherEmail", "teacherName", "dayOfWeek", "startTime", "endTime", "room", "weekNumber", "topicEn", "topicVi", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "StudentAssessment": {
+      "title": "StudentAssessment",
+      "description": "Teacher evaluation covering Cambridge CEFR level +/-, language skills, and social/emotional/mental scores.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "classId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "className": { "type": "string", "maxLength": 120 },
+        "teacherUid": { "type": "string", "maxLength": 128 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "termLabel": { "type": "string", "maxLength": 80 },
+        "cefrLevel": { "type": "string", "enum": ["Pre-A1 Starters", "A1 Movers", "A2 Flyers", "A2 Key", "B1 Preliminary", "B2 First", "C1 Advanced", "C2 Proficiency"] },
+        "cefrModifier": { "type": "string", "enum": ["-", "standard", "+"] },
+        "speakingScore": { "type": "number" },
+        "readingScore": { "type": "number" },
+        "writingScore": { "type": "number" },
+        "vocabularyScore": { "type": "number" },
+        "comprehensionScore": { "type": "number" },
+        "socialScore": { "type": "number" },
+        "emotionalScore": { "type": "number" },
+        "mentalScore": { "type": "number" },
+        "teacherCommentEn": { "type": "string", "maxLength": 1500 },
+        "teacherCommentVi": { "type": "string", "maxLength": 1500 },
+        "aiInsightEn": { "type": "string", "maxLength": 2000 },
+        "aiInsightVi": { "type": "string", "maxLength": 2000 },
+        "activitiesCompleted": { "type": "array", "maxLength": 20 },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "classId", "className", "teacherEmail", "teacherName", "parentEmail", "termLabel", "cefrLevel", "cefrModifier", "speakingScore", "readingScore", "writingScore", "socialScore", "emotionalScore", "mentalScore", "teacherCommentEn", "teacherCommentVi", "activitiesCompleted", "adminUids", "createdAt", "updatedAt"]
+    },
+    "GeminiNote": {
+      "title": "GeminiNote",
+      "description": "Curriculum material and Gemini AI-synthesized bilingual study notes.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 160 },
+        "weekNumber": { "type": "number" },
+        "programTitle": { "type": "string", "maxLength": 120 },
+        "sourceFileName": { "type": "string", "maxLength": 200 },
+        "summaryEn": { "type": "string", "maxLength": 2500 },
+        "summaryVi": { "type": "string", "maxLength": 2500 },
+        "keyVocabulary": { "type": "array", "maxLength": 40 },
+        "phonicsFocus": { "type": "string", "maxLength": 500 },
+        "grammarFocus": { "type": "string", "maxLength": 500 },
+        "activitiesEn": { "type": "string", "maxLength": 1500 },
+        "activitiesVi": { "type": "string", "maxLength": 1500 },
+        "uploadedByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploadedByEmail": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "weekNumber", "programTitle", "summaryEn", "summaryVi", "keyVocabulary", "uploadedByUid", "uploadedByEmail", "createdAt", "updatedAt"]
+    },
+    "TuitionInvoice": {
+      "title": "TuitionInvoice",
+      "description": "Parent tuition invoice, instant checkout payment, payer banking details, and email/Zalo reminder tracking.",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": { "type": "string", "maxLength": 40 },
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "parentUid": { "type": "string", "maxLength": 128 },
+        "parentPhone": { "type": "string", "maxLength": 40 },
+        "programId": { "type": "string", "maxLength": 128 },
+        "programTitle": { "type": "string", "maxLength": 160 },
+        "amountVnd": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["pending", "paid", "overdue", "reminder_sent"] },
+        "paymentMethod": { "type": "string", "enum": ["unselected", "direct_debit", "credit_card", "qr_transfer"] },
+        "paymentReference": { "type": "string", "maxLength": 120 },
+        "payerBankName": { "type": "string", "maxLength": 120 },
+        "payerAccountHolder": { "type": "string", "maxLength": 120 },
+        "paidAt": { "type": "string", "maxLength": 40 },
+        "reminderNote": { "type": "string", "maxLength": 500 },
+        "reminderChannel": { "type": "string", "enum": ["email", "zalo", "both"] },
+        "lastReminderAt": { "type": "string", "maxLength": 40 },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["invoiceNumber", "studentId", "studentName", "parentEmail", "programTitle", "amountVnd", "dueDate", "status", "paymentMethod", "adminUids", "createdAt", "updatedAt"]
+    },
+    "PayableRecord": {
+      "title": "PayableRecord",
+      "description": "Admin accounts payable, teacher payroll, and academy banking configuration.",
+      "type": "object",
+      "properties": {
+        "recordType": { "type": "string", "enum": ["teacher_payroll", "vendor_expense", "academy_bank_config"] },
+        "recipientName": { "type": "string", "maxLength": 120 },
+        "recipientEmail": { "type": "string", "maxLength": 160 },
+        "bankName": { "type": "string", "maxLength": 120 },
+        "bankAccountNumber": { "type": "string", "maxLength": 60 },
+        "bankAccountHolder": { "type": "string", "maxLength": 120 },
+        "amountVnd": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["scheduled", "paid", "pending", "active"] },
+        "notes": { "type": "string", "maxLength": 600 },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recordType", "recipientName", "bankName", "bankAccountNumber", "bankAccountHolder", "amountVnd", "dueDate", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "EnrollmentRequest": {
+      "title": "EnrollmentRequest",
+      "description": "Parent course enrollment submission.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "parentUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "programId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "programTitle": { "type": "string", "maxLength": 160 },
+        "preferredSchedule": { "type": "string", "maxLength": 160 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "approved", "enrolled"] },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "parentUid", "parentEmail", "programId", "programTitle", "status", "adminUids", "createdAt", "updatedAt"]
+    },
+    "ParentPaymentMethod": {
+      "title": "ParentPaymentMethod",
+      "description": "Parent saved banking and payment method (Direct Withdrawal, Credit Card, or QR).",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "parentPhone": { "type": "string", "maxLength": 40 },
+        "methodType": { "type": "string", "enum": ["direct_debit", "credit_card", "qr_transfer"] },
+        "providerLabel": { "type": "string", "maxLength": 120 },
+        "bankName": { "type": "string", "maxLength": 120 },
+        "accountLast4": { "type": "string", "maxLength": 16 },
+        "accountNumberMasked": { "type": "string", "maxLength": 40 },
+        "accountHolderName": { "type": "string", "maxLength": 120 },
+        "branchOrNotes": { "type": "string", "maxLength": 240 },
+        "autoPayEnabled": { "type": "boolean" },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "parentEmail", "methodType", "providerLabel", "accountLast4", "accountHolderName", "autoPayEnabled", "adminUids", "createdAt", "updatedAt"]
+    },
+    "AcademyBankConfig": {
+      "title": "AcademyBankConfig",
+      "description": "LiLab official receiving bank account and QR payment code displayed to parents during course checkout.",
+      "type": "object",
+      "properties": {
+        "bankName": { "type": "string", "maxLength": 120 },
+        "bankCode": { "type": "string", "maxLength": 30 },
+        "accountNumber": { "type": "string", "maxLength": 60 },
+        "accountHolder": { "type": "string", "maxLength": 120 },
+        "branchName": { "type": "string", "maxLength": 120 },
+        "zaloHotline": { "type": "string", "maxLength": 40 },
+        "paymentInstructionsEn": { "type": "string", "maxLength": 600 },
+        "paymentInstructionsVi": { "type": "string", "maxLength": 600 },
+        "qrImageDataUrl": { "type": "string", "maxLength": 180000 },
+        "useDynamicVietQr": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "updatedByEmail": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bankName", "bankCode", "accountNumber", "accountHolder", "isActive", "createdAt", "updatedAt"]
+    },
+    "PaymentReminderLog": {
+      "title": "PaymentReminderLog",
+      "description": "Immutable historical log of automated email and Zalo tuition payment reminders dispatched to parents.",
+      "type": "object",
+      "properties": {
+        "invoiceId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invoiceNumber": { "type": "string", "maxLength": 40 },
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "parentPhone": { "type": "string", "maxLength": 40 },
+        "programTitle": { "type": "string", "maxLength": 160 },
+        "amountVnd": { "type": "number" },
+        "channel": { "type": "string", "enum": ["email", "zalo"] },
+        "deliveryMode": { "type": "string", "maxLength": 40 },
+        "messagePreview": { "type": "string", "maxLength": 600 },
+        "sentByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sentByEmail": { "type": "string", "maxLength": 160 },
+        "sentAt": { "type": "string", "maxLength": 60 },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["invoiceId", "invoiceNumber", "studentId", "studentName", "parentEmail", "programTitle", "amountVnd", "channel", "deliveryMode", "messagePreview", "sentByUid", "sentByEmail", "sentAt", "adminUids", "createdAt", "updatedAt"]
+    },
+    "StudentQuickNote": {
+      "title": "StudentQuickNote",
+      "description": "Daily teacher observations for each student used to enrich Gemini student report generation.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "classId": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 120 },
+        "teacherUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "observationDate": { "type": "string", "maxLength": 30 },
+        "category": { "type": "string", "enum": ["general", "speaking", "reading", "writing", "vocabulary", "comprehension", "social", "emotional", "mental"] },
+        "noteText": { "type": "string", "maxLength": 1500 },
+        "includeInReport": { "type": "boolean" },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "teacherUid", "teacherEmail", "teacherName", "observationDate", "category", "noteText", "includeInReport", "adminUids", "createdAt", "updatedAt"]
+    },
+    "LearningResource": {
+      "title": "LearningResource",
+      "description": "Uploaded PDF handouts, practice worksheets, and supplemental reading materials tagged by week and CEFR skill level.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 40 },
+        "weekNumber": { "type": "number" },
+        "weekThemeEn": { "type": "string", "maxLength": 160 },
+        "weekThemeVi": { "type": "string", "maxLength": 160 },
+        "cefrLevel": { "type": "string", "enum": ["Pre-A1 Starters", "A1 Movers", "A2 Flyers", "A2 Key", "B1 Preliminary", "B2 First", "C1 Advanced", "C2 Proficiency"] },
+        "category": { "type": "string", "enum": ["pdf_handout", "practice_worksheet", "supplemental_reading"] },
+        "skillFocus": { "type": "string", "enum": ["Speaking", "Reading", "Writing", "Phonics & Vocabulary", "Listening", "Be Whole Values"] },
+        "estimatedMinutes": { "type": "number" },
+        "titleEn": { "type": "string", "maxLength": 160 },
+        "titleVi": { "type": "string", "maxLength": 160 },
+        "summaryEn": { "type": "string", "maxLength": 1500 },
+        "summaryVi": { "type": "string", "maxLength": 1500 },
+        "keyVocabulary": { "type": "array", "maxLength": 30 },
+        "phonicsOrGrammar": { "type": "string", "maxLength": 500 },
+        "readingPassageEn": { "type": "string", "maxLength": 3000 },
+        "readingPassageVi": { "type": "string", "maxLength": 3000 },
+        "fileName": { "type": "string", "maxLength": 200 },
+        "mimeType": { "type": "string", "maxLength": 100 },
+        "fileSizeBytes": { "type": "number" },
+        "fileBase64": { "type": "string", "maxLength": 850000 },
+        "assignedScope": { "type": "string", "enum": ["all", "class", "student"] },
+        "assignedClassIds": { "type": "array", "maxLength": 30 },
+        "assignedClassNames": { "type": "array", "maxLength": 30 },
+        "assignedStudentIds": { "type": "array", "maxLength": 60 },
+        "assignedStudentNames": { "type": "array", "maxLength": 60 },
+        "materialLinkUrl": { "type": "string", "maxLength": 500 },
+        "worksheetPromptsJson": { "type": "string", "maxLength": 15000 },
+        "uploadedByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploadedByEmail": { "type": "string", "maxLength": 160 },
+        "uploadedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "weekNumber", "weekThemeEn", "weekThemeVi", "cefrLevel", "category", "skillFocus", "estimatedMinutes", "titleEn", "titleVi", "summaryEn", "summaryVi", "keyVocabulary", "phonicsOrGrammar", "uploadedByUid", "uploadedByEmail", "uploadedByName", "createdAt", "updatedAt"]
+    },
+    "ResourceSubmission": {
+      "title": "ResourceSubmission",
+      "description": "Student exercise submission sent to assigned teacher for grading and returned to student.",
+      "type": "object",
+      "properties": {
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "resourceCode": { "type": "string", "maxLength": 40 },
+        "resourceTitleEn": { "type": "string", "maxLength": 160 },
+        "resourceTitleVi": { "type": "string", "maxLength": 160 },
+        "weekNumber": { "type": "number" },
+        "cefrLevel": { "type": "string", "maxLength": 60 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "classId": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 120 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "answersJson": { "type": "string", "maxLength": 15000 },
+        "studentNotes": { "type": "string", "maxLength": 2000 },
+        "autoScorePercent": { "type": "number" },
+        "status": { "type": "string", "enum": ["submitted", "graded"] },
+        "gradeScore": { "type": "number" },
+        "teacherFeedbackEn": { "type": "string", "maxLength": 2000 },
+        "teacherFeedbackVi": { "type": "string", "maxLength": 2000 },
+        "gradedByEmail": { "type": "string", "maxLength": 160 },
+        "gradedByName": { "type": "string", "maxLength": 120 },
+        "submittedAt": { "type": "string", "maxLength": 40 },
+        "gradedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["resourceId", "resourceCode", "resourceTitleEn", "resourceTitleVi", "weekNumber", "cefrLevel", "studentId", "studentName", "studentEmail", "parentEmail", "classId", "className", "teacherEmail", "teacherName", "answersJson", "studentNotes", "autoScorePercent", "status", "submittedAt", "createdAt", "updatedAt"]
+    },
+    "AcademyEvent": {
+      "title": "AcademyEvent",
+      "description": "Academy calendar event representing class schedules, CEFR assessment dates, and academy milestones with optional teacher & student assignments.",
+      "type": "object",
+      "properties": {
+        "titleEn": { "type": "string", "maxLength": 160 },
+        "titleVi": { "type": "string", "maxLength": 160 },
+        "eventDate": { "type": "string", "maxLength": 20 },
+        "startTime": { "type": "string", "maxLength": 20 },
+        "endTime": { "type": "string", "maxLength": 20 },
+        "eventType": { "type": "string", "enum": ["class_session", "cefr_assessment", "academy_milestone", "parent_workshop", "holiday"] },
+        "status": { "type": "string", "enum": ["scheduled", "rescheduled", "completed", "cancelled"] },
+        "location": { "type": "string", "maxLength": 120 },
+        "classId": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 120 },
+        "programId": { "type": "string", "maxLength": 128 },
+        "programTitle": { "type": "string", "maxLength": 160 },
+        "cefrLevel": { "type": "string", "maxLength": 60 },
+        "teacherEmail": { "type": "string", "maxLength": 160 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "studentIds": { "type": "array", "maxLength": 30 },
+        "studentNames": { "type": "array", "maxLength": 30 },
+        "studentEmails": { "type": "array", "maxLength": 30 },
+        "parentEmails": { "type": "array", "maxLength": 30 },
+        "seriesId": { "type": "string", "maxLength": 128 },
+        "descriptionEn": { "type": "string", "maxLength": 1000 },
+        "descriptionVi": { "type": "string", "maxLength": 1000 },
+        "previousDate": { "type": "string", "maxLength": 20 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByEmail": { "type": "string", "maxLength": 160 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["titleEn", "titleVi", "eventDate", "startTime", "endTime", "eventType", "status", "location", "descriptionEn", "descriptionVi", "createdByUid", "createdByEmail", "createdByName", "createdAt", "updatedAt"]
+    },
+    "IssuedCertificate": {
+      "title": "IssuedCertificate",
+      "description": "Official student achievement certificate issued exclusively by Academy Administrators; read-only for parents and students.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "studentAge": { "type": "number" },
+        "studentGender": { "type": "string", "enum": ["girl", "boy"] },
+        "studentPhotoUrl": { "type": "string", "maxLength": 250000 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "parentUid": { "type": "string", "maxLength": 128 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "assessmentId": { "type": "string", "maxLength": 128 },
+        "serialId": { "type": "string", "maxLength": 60 },
+        "cefrLevel": { "type": "string", "enum": ["Pre-A1 Starters", "A1 Movers", "A2 Flyers", "A2 Key", "B1 Preliminary", "B2 First", "C1 Advanced", "C2 Proficiency"] },
+        "cefrModifier": { "type": "string", "enum": ["-", "standard", "+"] },
+        "cefrDisplay": { "type": "string", "maxLength": 80 },
+        "pceLevelNumber": { "type": "number" },
+        "className": { "type": "string", "maxLength": 120 },
+        "termLabel": { "type": "string", "maxLength": 120 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "directorName": { "type": "string", "maxLength": 120 },
+        "directorTitleEn": { "type": "string", "maxLength": 120 },
+        "directorTitleVi": { "type": "string", "maxLength": 120 },
+        "awardTitleEn": { "type": "string", "maxLength": 160 },
+        "awardTitleVi": { "type": "string", "maxLength": 160 },
+        "citationEn": { "type": "string", "maxLength": 1000 },
+        "citationVi": { "type": "string", "maxLength": 1000 },
+        "issueDate": { "type": "string", "maxLength": 20 },
+        "certLang": { "type": "string", "enum": ["en", "vi", "bi"] },
+        "theme": { "type": "string", "enum": ["royal_gold", "rose_celebration", "heritage_teal"] },
+        "showScores": { "type": "boolean" },
+        "showStudentPhoto": { "type": "boolean" },
+        "hasScores": { "type": "boolean" },
+        "speakingScore": { "type": "number" },
+        "readingScore": { "type": "number" },
+        "writingScore": { "type": "number" },
+        "vocabularyScore": { "type": "number" },
+        "comprehensionScore": { "type": "number" },
+        "socialScore": { "type": "number" },
+        "emotionalScore": { "type": "number" },
+        "mentalScore": { "type": "number" },
+        "englishAvg": { "type": "number" },
+        "wholeChildAvg": { "type": "number" },
+        "compositeScore": { "type": "number" },
+        "honorTierKey": { "type": "string", "enum": ["distinction", "merit", "commended", "growth"] },
+        "issuedByUid": { "type": "string", "maxLength": 128 },
+        "issuedByEmail": { "type": "string", "maxLength": 160 },
+        "issuedByName": { "type": "string", "maxLength": 120 },
+        "adminUids": { "type": "array", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "studentAge", "studentGender", "parentEmail", "serialId", "cefrLevel", "cefrModifier", "cefrDisplay", "pceLevelNumber", "className", "termLabel", "teacherName", "directorName", "directorTitleEn", "directorTitleVi", "awardTitleEn", "awardTitleVi", "citationEn", "citationVi", "issueDate", "certLang", "theme", "showScores", "showStudentPhoto", "hasScores", "speakingScore", "readingScore", "writingScore", "vocabularyScore", "comprehensionScore", "socialScore", "emotionalScore", "mentalScore", "englishAvg", "wholeChildAvg", "compositeScore", "honorTierKey", "issuedByUid", "issuedByEmail", "issuedByName", "createdAt", "updatedAt"]
+    },
+    "StudentMindMap": {
+      "title": "StudentMindMap",
+      "description": "Interactive student brainstorming mind map with color-coded nodes and branches.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "title": { "type": "string", "maxLength": 160 },
+        "topicTag": { "type": "string", "maxLength": 80 },
+        "cefrLevel": { "type": "string", "maxLength": 60 },
+        "nodesJson": { "type": "string", "maxLength": 50000 },
+        "nodeCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "ownerUid", "title", "topicTag", "cefrLevel", "nodesJson", "nodeCount", "createdAt", "updatedAt"]
+    },
+    "StudentStudyNote": {
+      "title": "StudentStudyNote",
+      "description": "Student lesson study notebook document with structured headings, bullets, checklists, and key vocabulary boxes.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "title": { "type": "string", "maxLength": 160 },
+        "subjectTag": { "type": "string", "maxLength": 80 },
+        "cefrLevel": { "type": "string", "maxLength": 60 },
+        "blocksJson": { "type": "string", "maxLength": 50000 },
+        "vocabJson": { "type": "string", "maxLength": 15000 },
+        "excerpt": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "ownerUid", "title", "subjectTag", "cefrLevel", "blocksJson", "vocabJson", "excerpt", "createdAt", "updatedAt"]
+    },
+    "StudentCodeProgress": {
+      "title": "StudentCodeProgress",
+      "description": "Student Vibe Coding Lab XP points, completed coding challenges, unlocked digital badges, and streak progress.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentEmail": { "type": "string", "maxLength": 160 },
+        "parentEmail": { "type": "string", "maxLength": 160 },
+        "xpPoints": { "type": "number" },
+        "completedChallengeIds": { "type": "array", "maxLength": 50 },
+        "earnedBadgeIds": { "type": "array", "maxLength": 30 },
+        "currentStreak": { "type": "number" },
+        "lastCompletedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "studentName", "ownerUid", "xpPoints", "completedChallengeIds", "earnedBadgeIds", "currentStreak", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted admin & super_admin UIDs."
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User account profiles with PII protection."
+    },
+    "/user_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/UserInvite" },
+      "description": "Admin-created user invites claimed on first sign-in."
+    },
+    "/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/TeacherProfile" },
+      "description": "Teacher profiles, schedules, and pay/bank info."
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/StudentProfile" },
+      "description": "Student academic records and parent/teacher links."
+    },
+    "/programs/{programId}": {
+      "schema": { "$ref": "#/entities/ProgramCourse" },
+      "description": "LiLab academy course catalog."
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/AcademyClass" },
+      "description": "Active academy class cohorts."
+    },
+    "/schedules/{scheduleId}": {
+      "schema": { "$ref": "#/entities/ClassSchedule" },
+      "description": "Weekly timetable sessions."
+    },
+    "/assessments/{assessmentId}": {
+      "schema": { "$ref": "#/entities/StudentAssessment" },
+      "description": "Student Cambridge CEFR +/- and holistic ratings."
+    },
+    "/gemini_notes/{noteId}": {
+      "schema": { "$ref": "#/entities/GeminiNote" },
+      "description": "Curriculum materials and Gemini AI study notes."
+    },
+    "/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/TuitionInvoice" },
+      "description": "Parent invoices and payment status."
+    },
+    "/payables/{payableId}": {
+      "schema": { "$ref": "#/entities/PayableRecord" },
+      "description": "Accounts payable, teacher payroll, and academy banking info."
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/EnrollmentRequest" },
+      "description": "Course enrollment requests from parents."
+    },
+    "/payment_methods/{methodId}": {
+      "schema": { "$ref": "#/entities/ParentPaymentMethod" },
+      "description": "Parent direct withdrawal, credit card, and QR preferences."
+    },
+    "/quick_notes/{noteId}": {
+      "schema": { "$ref": "#/entities/StudentQuickNote" },
+      "description": "Daily teacher observations per student feeding into Gemini student report generation."
+    },
+    "/learning_resources/{resourceId}": {
+      "schema": { "$ref": "#/entities/LearningResource" },
+      "description": "Uploaded PDF handouts, practice worksheets, and reading materials tagged by week and CEFR skill level."
+    },
+    "/resource_submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/ResourceSubmission" },
+      "description": "Student exercise submissions and teacher grading records."
+    },
+    "/academy_events/{eventId}": {
+      "schema": { "$ref": "#/entities/AcademyEvent" },
+      "description": "Academy Event Calendar items for class sessions, CEFR assessments, and milestones."
+    },
+    "/academy_banking/{configId}": {
+      "schema": { "$ref": "#/entities/AcademyBankConfig" },
+      "description": "Official LiLab receiving bank account and QR payment code readable by signed-in parents and managed by admins."
+    },
+    "/reminder_logs/{logId}": {
+      "schema": { "$ref": "#/entities/PaymentReminderLog" },
+      "description": "Historical automated Email and Zalo tuition payment reminder logs for the Admin transaction ledger."
+    },
+    "/issued_certificates/{certificateId}": {
+      "schema": { "$ref": "#/entities/IssuedCertificate" },
+      "description": "Official student certificates issued exclusively by Academy Administrators; read-only collection per student for parents and students."
+    },
+    "/student_mind_maps/{mapId}": {
+      "schema": { "$ref": "#/entities/StudentMindMap" },
+      "description": "Saved interactive student mind maps created in Mind Map Studio."
+    },
+    "/student_study_notes/{noteId}": {
+      "schema": { "$ref": "#/entities/StudentStudyNote" },
+      "description": "Saved student lesson notes with structured formatting and key vocabulary callouts."
+    },
+    "/student_code_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/StudentCodeProgress" },
+      "description": "Persistent Vibe Coding Lab Code Challenges XP, completed tasks, and earned digital badges per student."
+    }
+  }
+}

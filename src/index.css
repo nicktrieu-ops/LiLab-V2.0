@@ -1,0 +1,270 @@
+@import "tailwindcss";
+
+/*
+ * LiLab V2.0 design tokens
+ * One family (Be Vietnam Pro — drawn for Vietnamese diacritics) carries every role.
+ * Ink navy is the structure, Lantern orange is the only "do this" colour,
+ * Sun yellow marks "you are here", Lotus magenta is reserved for enrolment offers.
+ */
+@theme {
+  --font-sans: 'Be Vietnam Pro', system-ui, sans-serif;
+  --font-display: 'Be Vietnam Pro', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-ink: #1A2462;
+  --color-ink-soft: #2B3A8F;
+  --color-paper: #F5F6FA;
+  --color-chalk: #E9ECF4;
+  --color-muted: #4E5A7E;
+  --color-lantern: #FF6B00;
+  --color-lantern-deep: #D95A00;
+  --color-sun: #FFD41D;
+  --color-lotus: #E61E64;
+  --color-lagoon: #1F9A92;
+}
+
+@layer base {
+  :root {
+    --surface-canvas: var(--color-paper);
+    --surface-card: #FFFFFF;
+    --surface-subtle: var(--color-chalk);
+    --border-hairline: rgba(26, 36, 98, 0.10);
+    --lilab-cream: var(--color-paper);
+    --lilab-blue: var(--color-ink-soft);
+    --lilab-magenta: var(--color-lotus);
+    --lilab-accent: var(--color-lantern);
+    --lilab-accent-hover: var(--color-lantern-deep);
+    --lilab-yellow: var(--color-sun);
+    --lilab-teal: #56BEB8;
+    --lilab-ink: var(--color-ink);
+    --lilab-muted: var(--color-muted);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--surface-canvas);
+    color: var(--lilab-ink);
+    font-feature-settings: 'ss01', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: rgba(255, 212, 29, 0.55);
+    color: var(--color-ink);
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [role='tab']:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px rgba(255, 212, 29, 0.6);
+  }
+
+  .font-mono-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* "You are here" marker: a sun-yellow bar under the active tab in the navy app bar */
+.lilab-tab {
+  position: relative;
+  color: rgba(255, 255, 255, 0.72);
+  transition: color 150ms ease;
+}
+.lilab-tab:hover {
+  color: #FFFFFF;
+}
+.lilab-tab[aria-current='page'] {
+  color: #FFFFFF;
+}
+.lilab-tab[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: -0.55rem;
+  height: 4px;
+  border-radius: 4px 4px 0 0;
+  background: var(--color-sun);
+}
+
+/* Storybook cover: the navy hero panel on the welcome page */
+.lilab-cover {
+  background-color: var(--color-ink);
+  background-image:
+    radial-gradient(circle 200px at 170px calc(100% + 70px), var(--color-sun) 0 99.5%, transparent 100%),
+    radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.2px);
+  background-size: 100% 100%, 22px 22px;
+}
+@media (max-width: 1023px) {
+  .lilab-cover {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+  }
+}
+
+.lilab-surface {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 1rem;
+}
+
+.lilab-btn-accent {
+  background-color: var(--lilab-accent);
+  color: #FFFFFF;
+  transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1), transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lilab-btn-accent:hover:not(:disabled) {
+  background-color: var(--lilab-accent-hover);
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes gentleFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3.5px); }
+}
+@keyframes gentleFloatReverse {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(3.5px); }
+}
+@keyframes mascotHop {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  45% { transform: translateY(-7px) scale(0.95, 1.05); }
+  80% { transform: translateY(0) scale(1.04, 0.96); }
+}
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+.svg-float {
+  animation: gentleFloat 3.6s ease-in-out infinite;
+}
+.svg-float-alt {
+  animation: gentleFloatReverse 3.2s ease-in-out infinite;
+}
+.svg-sparkle {
+  animation: pulseGlow 2.4s ease-in-out infinite;
+}
+.mascot-hop {
+  animation: mascotHop 1.3s ease-in-out infinite;
+}
+.year-card {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), border-color 200ms ease, opacity 200ms ease;
+}
+.year-card.active-card {
+  transform: scale(1.01);
+  border-color: #FF6B00;
+}
+.year-card.inactive-card {
+  opacity: 0.9;
+}
+.year-card.inactive-card:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+.milestone-checkbox:checked {
+  background-color: #FF6B00;
+  border-color: #FF6B00;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .svg-float,
+  .svg-float-alt,
+  .svg-sparkle,
+  .mascot-hop {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only-clean {
+    box-shadow: none !important;
+    border: 1px solid #cbd5e1 !important;
+    margin: 0 0 1rem 0 !important;
+    padding: 1.25rem !important;
+    break-inside: avoid;
+  }
+  .report-student-avatar {
+    width: 7.25rem !important;
+    height: 7.25rem !important;
+    min-width: 7.25rem !important;
+    min-height: 7.25rem !important;
+    border-width: 3px !important;
+  }
+  .report-student-name {
+    font-size: 2.15rem !important;
+    line-height: 1.15 !important;
+    font-weight: 800 !important;
+  }
+  .report-banner-student-name {
+    font-size: 1.65rem !important;
+    line-height: 1.2 !important;
+    font-weight: 800 !important;
+  }
+  .report-narrative-card {
+    padding: 1.35rem !important;
+    break-inside: avoid;
+  }
+  .report-narrative-title {
+    font-size: 1.25rem !important;
+    line-height: 1.3 !important;
+    font-weight: 800 !important;
+    margin-bottom: 0.5rem !important;
+  }
+  .report-narrative-body {
+    font-size: 1.125rem !important;
+    line-height: 1.65 !important;
+  }
+  body.printing-certificate {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-certificate .certificate-print-root {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    width: 100% !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}

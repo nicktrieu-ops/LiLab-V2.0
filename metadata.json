@@ -1,0 +1,8 @@
+{
+  "name": "LiLab Creative Talent Academy",
+  "description": "Bilingual Vietnamese & English academy platform with AI-powered Gemini Notes, CEFR assessment dashboards, scheduling, and parent billing.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
